@@ -1,0 +1,11 @@
+#include <include/common.almfx>
+
+
+
+OUT MainVS(INPUT inp)
+{
+    const float4x4 vp = mul(transpose(PerFrame.view), transpose(PerFrame.proj));
+    OUT outv = (OUT) 0;
+    outv.position = mul(float4(inp.position, 1.0f), vp);
+    return outv;
+}

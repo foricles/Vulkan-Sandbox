@@ -1,0 +1,32 @@
+#include <include/common.almfx>
+
+
+
+SamplerState pointsampler : register(s0, space1);
+Texture2D depthMap : register(t0, space1);
+
+float4 MainVS(uint vid : SV_VertexID) : SV_POSITION
+{
+    const float4 vertices[] =
+    {
+        { -1, -1, 0, 0 },
+        { -1, 1, 0, 0 },
+        { 1, 1, 0, 0 },
+        { 1, -1, 0, 0 }
+    };
+    return vertices[vid];
+}
+
+
+float4 MainPS(float4 position : SV_POSITION) : SV_Target
+{
+    const float2 screenTc = position.xy * PerFrame.screenSize.zw;
+
+    float depth = depthMap.Sample(pointsampler, screenTc).r;
+    
+    float z = depth * 2 - 1;
+    
+    depth = (2.0 * PerFrame.frustum.x * PerFrame.frustum.y) / (PerFrame.frustum.y + PerFrame.frustum.x - z * (PerFrame.frustum.y - PerFrame.frustum.x));
+    
+    return float4(depth / PerFrame.frustum.y, 1, 1, 1);
+}

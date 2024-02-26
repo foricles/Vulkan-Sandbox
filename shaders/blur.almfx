@@ -1,0 +1,55 @@
+#ifdef _PERMUTATION0_
+    #define _VERTICALBLUR_
+#endif
+
+#define GAUSS_KERNEL 9
+#define HALF_KERNEL float(float(GAUSS_KERNEL) / 2.0f)
+
+
+#include <include/common.almfx>
+
+
+struct GaussKernel
+{
+    float weights[GAUSS_KERNEL + 1];
+};
+
+
+SamplerState pointsampler : register(s0, space1);
+Texture2D gbuffer : register(t0, space1);
+StructuredBuffer<GaussKernel> gaussKernel : register(t1, space1);
+
+float4 MainVS(uint vid : SV_VertexID) : SV_POSITION
+{
+    const float4 vertices[] = {
+        { -1, -1, 0, 0},
+        { -1,  1, 0, 0},
+        {  1,  1, 0, 0},
+        {  1, -1, 0, 0}
+    };
+    return vertices[vid];
+}
+
+
+float4 MainPS(float4 position : SV_POSITION) : SV_Target
+{
+    const uint width = PerFrame.screenSize.x;
+    const uint height = PerFrame.screenSize.y;
+    
+    
+    GaussKernel kernel = gaussKernel[uint(position.x) * height + uint(position.y)];
+#ifdef _VERTICALBLUR_
+    float2 direction = float2(1, 0);
+#else
+    float2 direction = float2(0, 1);
+#endif
+    
+    float3 cAcum = 0;
+    for (uint i = 0; i <= GAUSS_KERNEL; ++i)
+    {
+        const float2 samplePosition = (position.xy + direction * float(i - HALF_KERNEL)) * PerFrame.screenSize.zw;
+        cAcum += gbuffer.Sample(pointsampler, samplePosition).xyz * kernel.weights[i];
+    }
+    
+    return float4(cAcum, 1);
+}

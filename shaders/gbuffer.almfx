@@ -1,0 +1,82 @@
+#ifdef _PERMUTATION0_
+    #define _HAS_DIFFUSE_
+#endif
+#ifdef _PERMUTATION1_
+    #define _HAS_NORMAL_
+#endif
+
+
+#include <include/common.almfx>
+
+#ifdef _HAS_DIFFUSE_
+    Texture2D diffuseMap : register(t0, space1);
+#endif
+#ifdef _HAS_NORMAL_
+    Texture2D normalMap : register(t1, space1);
+#endif
+
+#if defined(_HAS_DIFFUSE_) || defined(_HAS_NORMAL_)
+    SamplerState linersampler : register(s0, space1);
+#endif
+
+
+OUT MainVS(INPUT inp)
+{
+    const float4x4 vp = mul(PerFrame.view, PerFrame.proj);
+    OUT outv = (OUT)0;
+    outv.position = mul(float4(inp.position, 1.0f), vp);
+    outv.depth = outv.position.z / outv.position.w;
+
+    const float3 normal = inp.normal;
+    const float3 tangent = inp.tangent;
+    const float3 bitangent = inp.bitangent;
+    
+    outv.TBN = float3x3(
+        tangent,
+        bitangent,
+        normal
+    );
+    
+    outv.tcCoord = inp.tcCoord;
+    outv.position.y = -outv.position.y;
+    return outv;
+}
+
+struct PS_OUTPUT
+{
+    float4 Color: SV_Target0;
+    float4 Normal: SV_Target1;
+};
+
+
+PS_OUTPUT MainPS(OUT inp)
+{
+    PS_OUTPUT psOut = (PS_OUTPUT)0;
+
+    psOut.Normal.xyz = (normalize(inp.TBN[2])) * 0.5f + 0.5f;
+    psOut.Color = float4(1, 1, 1, 1);
+
+#ifdef _HAS_DIFFUSE_
+
+    const float4 diffuse = diffuseMap.Sample(linersampler, inp.tcCoord);   
+    if (diffuse.w <= 0.5f)
+    {
+        discard;
+    }
+    
+    psOut.Color = float4(diffuse.xyz, 1);
+#endif
+    
+#ifdef _HAS_NORMAL_
+    const float3 normal = normalMap.Sample(linersampler, inp.tcCoord).xyz * 2.0f - 1.0f;
+    const float3 normalTrans = mul(normal, inp.TBN);
+    psOut.Normal.xyz = normalTrans;
+#endif
+
+    float z = inp.depth * 2 - 1;
+    float depth = (2.0 * PerFrame.frustum.x * PerFrame.frustum.y) / (PerFrame.frustum.y + PerFrame.frustum.x - z * (PerFrame.frustum.y - PerFrame.frustum.x));
+    
+    psOut.Normal.w = depth / PerFrame.frustum.y;
+    
+    return psOut;
+}

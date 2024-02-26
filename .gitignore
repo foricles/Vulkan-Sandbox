@@ -30,3 +30,13 @@
 *.exe
 *.out
 *.app
+
+#resources
+*.jpg
+*.jpeg
+*.png
+*.fbx
+
+#Folders
+build/
+solution/

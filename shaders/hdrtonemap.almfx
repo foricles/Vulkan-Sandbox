@@ -1,0 +1,35 @@
+#include <include/common.almfx>
+
+
+
+SamplerState pointsampler : register(s0, space1);
+Texture2D gbuffer : register(t0, space1);
+
+float4 MainVS(uint vid : SV_VertexID) : SV_POSITION
+{
+    const float4 vertices[] =
+    {
+        { -1, -1, 0, 0 },
+        { -1, 1, 0, 0 },
+        { 1, 1, 0, 0 },
+        { 1, -1, 0, 0 }
+    };
+    return vertices[vid];
+}
+
+
+float4 MainPS(float4 position : SV_POSITION) : SV_Target
+{
+    const float2 screenTc = position.xy * PerFrame.screenSize.zw;
+
+    float3 hdrColor = gbuffer.Sample(pointsampler, screenTc).xyz;
+    
+    const float gamma = PerFrame.hdrTonemap.x;
+    const float exposure = PerFrame.hdrTonemap.y;
+    
+    float3 mapped = 1.0f - exp(-hdrColor * exposure);
+    mapped = pow(mapped, 1.0f / gamma);
+    
+    
+    return float4(mapped, 1);
+}

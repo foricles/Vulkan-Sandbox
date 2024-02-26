@@ -1,0 +1,62 @@
+#define SSAO_KERNEL 24
+
+struct INPUT
+{
+    float3 position : POSITION;
+    float3 normal : NORMAL0;
+    float3 tangent : TANGENT0;
+    float3 bitangent : BINORMAL0;
+    float2 tcCoord : TEXCOORD0;
+};
+
+struct OUT
+{
+    float4 position : SV_POSITION;
+    float2 tcCoord : TEXCOORD0;
+    float depth : POSITION0;
+    float3x3 TBN : NORMAL0;
+};
+
+struct Constants
+{
+    float4x4 view;
+    float4x4 proj;
+    float4x4 view_invert;
+    float4x4 proj_invert;
+    float4 directionLight;
+    float4 screenSize;
+    float4 frustum;
+    float4 hdrTonemap;
+};
+
+
+ConstantBuffer<Constants> PerFrame : register(b0, space0);
+
+
+inline float3 ViewSpacePosFromDepth(float2 screenTc, float depth)
+{
+    const float z = depth * 2.0 - 1.0;
+
+    const float4 clipSpacePosition = float4(screenTc * 2.0 - 1.0, z, 1.0);
+    float4 viewSpacePosition = mul(clipSpacePosition, PerFrame.proj_invert);
+
+    // Perspective division
+    viewSpacePosition /= viewSpacePosition.w;
+    
+    return viewSpacePosition.xyz;
+}
+
+inline float3 WorldPosFromDepth(float2 screenTc, float depth)
+{
+    const float z = depth * 2.0 - 1.0;
+
+    const float4 clipSpacePosition = float4(screenTc * 2.0 - 1.0, z, 1.0);
+    float4 viewSpacePosition = mul(clipSpacePosition, PerFrame.proj_invert);
+
+    // Perspective division
+    viewSpacePosition /= viewSpacePosition.w;
+
+    const float4 worldSpacePosition = mul(viewSpacePosition, PerFrame.view_invert);
+
+    return worldSpacePosition.xyz;
+}
