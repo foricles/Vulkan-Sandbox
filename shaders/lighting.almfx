@@ -7,6 +7,7 @@ Texture2D diffuseTarget : register(t0, space1);
 Texture2D normalTarget : register(t1, space1);
 Texture2D ssaoMap : register(t2, space1);
 Texture2D depthTarget : register(t3, space1);
+Texture2D shadowmap : register(t4, space1);
 
 float4 MainVS(uint vid : SV_VertexID) : SV_POSITION
 {
@@ -29,7 +30,7 @@ float4 MainPS(float4 position : SV_POSITION) : SV_Target
     
     const float depth = depthTarget.Sample(pointsampler, screenTc).r;
     const float3 worldPosition = WorldPosFromDepth(screenTc, depth);
-    float3 viewPosition = -PerFrame.view._41_42_43;
+    float3 viewPosition = -PerFrame.view._14_24_34;
     const float3 lightDir = normalize(-PerFrame.directionLight.xyz);
 
     
@@ -39,11 +40,13 @@ float4 MainPS(float4 position : SV_POSITION) : SV_Target
     const float3 diffuse = diffuseTarget.Sample(pointsampler, screenTc).xyz;
     const float3 normal = normalTarget.Sample(pointsampler, screenTc).xyz * 2.0f - 1.0f;
     
-    const float shininess = 32;
+    const float shininess = 1;
     const float specular = pow(max(dot(normal, halfWay), 0.0), shininess);
     
-    const float shadow = (max(0, dot(normal, lightDir)) + 0.1f) * PerFrame.directionLight.w;
+    const float shadowmapval = shadowmap.Sample(pointsampler, screenTc).r;
+    const float shadow = (max(0, dot(normal, lightDir) * shadowmapval) + 0.1f) * PerFrame.directionLight.w;
     
-    return float4(ssaoMask * diffuse * shadow + lerp(0, 0.00001, specular), 1);
+    
+    return float4(ssaoMask * diffuse * shadow * lerp(0.99999, 1, specular), 1);
     //return float4(ssaoMask * diffuse * lerp(0.9999, 1, shadow) + lerp(0, 0.00001, specular), 1);
 }

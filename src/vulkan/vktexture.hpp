@@ -12,7 +12,7 @@ public:
 	Texture(Texture&& texture) noexcept;
 	~Texture();
 
-	inline operator VkImage& () { return m_vkImage; }
+	inline VkImage Get() const { return m_vkImage; }
 	Texture& operator=(Texture&& texture) noexcept;
 
 	void Create(uint32_t width, uint32_t height, EPixelFormat format, uint32_t mip = 1);
@@ -24,8 +24,7 @@ public:
 public:
 	inline uint32_t GetWidth() const { return m_width; }
 	inline uint32_t GetHeight() const { return m_height; }
-	inline VkImageView& GetView() { return m_vkImageView; }
-	inline const VkImageView& GetView() const { return m_vkImageView; }
+	inline const VkImageView GetView() const { return m_vkImageView; }
 
 public:
 	Texture(const Texture&) = delete;
@@ -51,8 +50,7 @@ public:
 	Sampler(Sampler&& sampler) noexcept;
 	~Sampler();
 
-	inline operator VkSampler& () { return m_vkSampler; }
-	inline const VkSampler& Get() const { return m_vkSampler; }
+	inline const VkSampler Get() const { return m_vkSampler; }
 	Sampler& operator=(Sampler&& sampler) noexcept;
 
 	void Create(ESampleFilter filter, ESampleMode mode, float anisotropy, float mipCount);

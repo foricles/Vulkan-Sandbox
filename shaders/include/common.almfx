@@ -12,6 +12,7 @@ struct INPUT
 struct OUT
 {
     float4 position : SV_POSITION;
+    float3 worldPosition : POSITION1;
     float2 tcCoord : TEXCOORD0;
     float depth : POSITION0;
     float3x3 TBN : NORMAL0;
@@ -35,9 +36,7 @@ ConstantBuffer<Constants> PerFrame : register(b0, space0);
 
 inline float3 ViewSpacePosFromDepth(float2 screenTc, float depth)
 {
-    const float z = depth * 2.0 - 1.0;
-
-    const float4 clipSpacePosition = float4(screenTc * 2.0 - 1.0, z, 1.0);
+    const float4 clipSpacePosition = float4(screenTc, depth, 1.0) * 2.0 - 1.0;
     float4 viewSpacePosition = mul(clipSpacePosition, PerFrame.proj_invert);
 
     // Perspective division
@@ -48,9 +47,7 @@ inline float3 ViewSpacePosFromDepth(float2 screenTc, float depth)
 
 inline float3 WorldPosFromDepth(float2 screenTc, float depth)
 {
-    const float z = depth * 2.0 - 1.0;
-
-    const float4 clipSpacePosition = float4(screenTc * 2.0 - 1.0, z, 1.0);
+    const float4 clipSpacePosition = float4(screenTc, depth, 1.0) * 2.0 - 1.0;
     float4 viewSpacePosition = mul(clipSpacePosition, PerFrame.proj_invert);
 
     // Perspective division

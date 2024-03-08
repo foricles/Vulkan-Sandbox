@@ -15,6 +15,9 @@ enum class EShaderType
 	Vertex,
 	Fragment,
 	Compute,
+	RayGeneration,
+	RayMiss,
+	RayClosestHit,
 
 	COUNT
 };

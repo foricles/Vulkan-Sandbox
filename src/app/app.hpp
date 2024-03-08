@@ -26,6 +26,7 @@ public:
 
 private:
 	void GBufferPass();
+	void RaytraceShadows();
 	void LightingPass();
 	void SSAOPass();
 	void FinalHDRPass();

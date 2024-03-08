@@ -55,7 +55,7 @@ void Buffer::Load(const void* pMem, uint32_t size, VkCommandPool commandPool)
 
         if (!m_isCpuCoherent)
         {
-            vbufferInfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+            vbufferInfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
         }
 
         VK_ASSERT(vkCreateBuffer(VkGlobals::vkDevice, &vbufferInfo, VkGlobals::vkAllocatorCallback, &m_vkBuffer));
@@ -69,7 +69,7 @@ void Buffer::Load(const void* pMem, uint32_t size, VkCommandPool commandPool)
         }
         else
         {
-            m_vkMemory = VulkanEngine::AllocateMemory(m_vkBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            m_vkMemory = VulkanEngine::AllocateMemory(m_vkBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT);
         }
         VK_ASSERT(vkBindBufferMemory(VkGlobals::vkDevice, m_vkBuffer, m_vkMemory, 0));
     }
@@ -125,6 +125,14 @@ VkDescriptorBufferInfo Buffer::GetDscInfo() const
     bufferInfo.range = m_size;
     bufferInfo.offset = 0;
     return bufferInfo;
+}
+
+VkDeviceAddress Buffer::GetDeviceAddress() const
+{
+    VkBufferDeviceAddressInfo pInfo = { VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
+    pInfo.buffer = m_vkBuffer;
+    VkDeviceAddress address = vkGetBufferDeviceAddress(VkGlobals::vkDevice, &pInfo);
+    return address;
 }
 
 void Buffer::FreeBuffer()

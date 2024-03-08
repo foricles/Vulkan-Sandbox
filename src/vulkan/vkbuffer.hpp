@@ -16,6 +16,8 @@ public:
     void Load(const void* pMem, uint32_t size, VkCommandPool commandPool = VK_NULL_HANDLE);
     VkDescriptorBufferInfo GetDscInfo() const;
 
+    VkDeviceAddress GetDeviceAddress() const;
+
 public:
     inline uint32_t size() const { return m_size; }
     inline VkDeviceMemory GetMemory() const { return m_vkMemory; }

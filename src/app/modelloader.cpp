@@ -148,6 +148,8 @@ Model ModelLoader::Load(std::string_view pilepath)
 		| aiProcess_Triangulate
 		| aiProcess_GenSmoothNormals
 		| aiProcess_EmbedTextures
+		| aiProcess_OptimizeGraph
+		| aiProcess_OptimizeMeshes
 		| aiProcess_CalcTangentSpace;
 	const aiScene* pScene = Importer.ReadFile(pilepath.data(), flags);
 

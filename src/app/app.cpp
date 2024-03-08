@@ -4,9 +4,11 @@
 #include "../vulkan/vkengine.hpp"
 #include "../vulkan/vkutils.hpp"
 #include "../vulkan/vkrenderpass.hpp"
-#include "../vulkan/vkshader.hpp"
+#include "../vulkan/shader/graphicshader.hpp"
+#include "../vulkan/shader/raytraceshader.hpp"
 #include "../vulkan/vktexture.hpp"
 #include "../vulkan/vkbuffer.hpp"
+#include "../vulkan/vkacstructure.hpp"
 #include "modelloader.hpp"
 #include "camera.hpp"
 
@@ -57,6 +59,7 @@ struct GBuffer
 {
 	Texture diffuse;
 	Texture normal;
+	Texture txrGlobalPosition;
 	Renderpass renderpass;
 	Framebuffer framebuffer;
 };
@@ -67,6 +70,14 @@ struct SSAO
 	Renderpass renderpass;
 	Framebuffer framebuffer;
 	Buffer kernel{ EBufferType::Storage };
+};
+
+struct DirectShadow
+{
+	Texture txrShadowMask;
+	ShaderRaytrace shaderShadows;
+	AccelerationStructure topAccStructure;
+	AccelerationStructure bottomAccStructure;
 };
 
 struct AppPimpl
@@ -92,19 +103,21 @@ struct AppPimpl
 	ConstantBuffer constants;
 	Buffer constantBuffer{ EBufferType::Uniform, true };
 	Buffer fullScreenIndecies{ EBufferType::Index };
+	RenderState fullscreenState;
 
 	Texture txrDepth;
 	Texture txrHdrTarget;
 
-	Shader shaderGBuffer;
-	Shader shaderLighting;
-	Shader shaderSSAO;
-	Shader shaderHDRTonemap;
+	ShaderGraphics shaderGBuffer;
+	ShaderGraphics shaderLighting;
+	ShaderGraphics shaderSSAO;
+	ShaderGraphics shaderHDRTonemap;
 
 	VkRect2D rndArea{};
 	VkViewport viewport{};
 	VkRect2D scissor{};
 
+	DirectShadow directionalShadow;
 	Camera mainCamera;
 
 	std::vector<GpuMesh> meshesToDraw;
@@ -117,6 +130,9 @@ struct AppPimpl
 void App::Init()
 {
 	m_pApp = new AppPimpl();
+
+	m_pApp->fullscreenState.cullMode = ECull::None;
+	m_pApp->fullscreenState.hasInputAttachment = false;
 
 	m_pApp->acquireImageSem = VulkanEngine::CreateVkSemaphore();
 	m_pApp->presentImageSem = VulkanEngine::CreateVkSemaphore();
@@ -151,6 +167,14 @@ void App::Init()
 		m_pApp->shaderSSAO.MarkProgram(EShaderType::Vertex, "MainVS");
 		m_pApp->shaderSSAO.MarkProgram(EShaderType::Fragment, "MainPS");
 	}
+	{
+		auto data = helpers::sb_read_file("shaders\\shadowsraytrace.almfx");
+		m_pApp->directionalShadow.shaderShadows.SetSource(reinterpret_cast<char*>(data.data()));
+		m_pApp->directionalShadow.shaderShadows.MarkProgram(EShaderType::RayGeneration, "RayGenerationRS");
+		m_pApp->directionalShadow.shaderShadows.MarkProgram(EShaderType::RayClosestHit, "CloseHitRS");
+		m_pApp->directionalShadow.shaderShadows.MarkProgram(EShaderType::RayMiss, "MissRS");
+		m_pApp->directionalShadow.shaderShadows.SetState(0, 0);
+	}
 
 	m_pApp->fullScreenIndecies.Load(std::vector<uint32_t>{0, 1, 2, 1, 3, 2});
 
@@ -163,6 +187,7 @@ void App::Init()
 
 
 	Model diorama = ModelLoader().Load("models\\diorama\\diorama_ww2\\diorama.fbx");
+	//Model diorama = ModelLoader().Load("models\\backpack\\backpack.fbx");
 	for (auto& material : diorama.materials)
 	{
 		GpuMaterial& gpuMaterial = m_pApp->materials[material.first];
@@ -195,6 +220,23 @@ void App::Init()
 	std::sort(m_pApp->meshesToDraw.begin(), m_pApp->meshesToDraw.end(), [](const GpuMesh& meshA, const GpuMesh& meshB) {
 		return meshA.materialId > meshB.materialId;
 	});
+
+
+	AccStructBuilder builder = m_pApp->directionalShadow.bottomAccStructure.Builder(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
+	for (auto& mesh : m_pApp->meshesToDraw)
+	{
+		builder.AddTriangles(mesh.vertices, mesh.indices)
+			.MaxVertices(mesh.vertices.size() / sizeof(Vertex))
+			.Primitives(mesh.indexCount / 3)
+			.Stride(sizeof(Vertex));
+	}
+	builder.Build();
+
+
+	m_pApp->directionalShadow.topAccStructure.Builder(VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR)
+		.AddAccelerationStructure(&m_pApp->directionalShadow.bottomAccStructure)
+		.Build();
+
 
 	std::default_random_engine generator;
 	std::uniform_real_distribution<float> rnd_floats(0, 1);
@@ -255,6 +297,11 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 		VkGlobals::swapchain.height,
 		EPixelFormat::RGBA
 	);
+	m_pApp->gbuffer.txrGlobalPosition.Create(
+		VkGlobals::swapchain.width,
+		VkGlobals::swapchain.height,
+		EPixelFormat::RGBA32
+	);
 
 	m_pApp->txrHdrTarget.Create(
 		VkGlobals::swapchain.width,
@@ -274,6 +321,12 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 		EPixelFormat::D32
 	);
 
+	m_pApp->directionalShadow.txrShadowMask.Create(
+		VkGlobals::swapchain.width,
+		VkGlobals::swapchain.height,
+		EPixelFormat::Mono
+	);
+
 	if (!m_isRenderInit)
 	{
 		m_isRenderInit = true;
@@ -282,6 +335,8 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 			.AddAttachment(EPixelFormat::RGBA, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
 				.ClearOnBegin()
 			.AddAttachment(EPixelFormat::RGBA, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+				.ClearOnBegin()
+			.AddAttachment(EPixelFormat::RGBA32, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
 				.ClearOnBegin()
 			.AddAttachment(EPixelFormat::D32, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL)
 				.ClearOnBegin()
@@ -303,21 +358,26 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 
 		for (auto& gpuMaterial : m_pApp->materials)
 		{
-			bool hasTexture = false;
 			m_pApp->shaderGBuffer.SetState(m_pApp->gbuffer.renderpass, gpuMaterial.second.flags, gpuMaterial.first, RenderState());
-			if (gpuMaterial.second.flags & esf_HasDiffuseMap)
+			if (m_pApp->shaderGBuffer.HasBindables())
 			{
-				hasTexture = true;
-				m_pApp->shaderGBuffer.WriteImage(gpuMaterial.second.diffuse, 0);
-			}
-			if (gpuMaterial.second.flags & esf_HasNormalMap)
-			{
-				hasTexture = true;
-				m_pApp->shaderGBuffer.WriteImage(gpuMaterial.second.normal, 1);
-			}
-			if (hasTexture)
-			{
-				m_pApp->shaderGBuffer.WriteSampler(m_pApp->linearSampler, 0);
+				bool hasTexture = false;
+				ShaderBinder binder = m_pApp->shaderGBuffer.Binder();
+				if (gpuMaterial.second.flags & esf_HasDiffuseMap)
+				{
+					hasTexture = true;
+					binder.Image(gpuMaterial.second.diffuse, 0);
+				}
+				if (gpuMaterial.second.flags & esf_HasNormalMap)
+				{
+					hasTexture = true;
+					binder.Image(gpuMaterial.second.normal, 1);
+				}
+				if (hasTexture)
+				{
+					binder.ImageSampler(m_pApp->linearSampler, 0);
+				}
+				binder.Bind();
 			}
 		}
 	}
@@ -328,6 +388,7 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 		{
 			m_pApp->gbuffer.diffuse.GetView(),
 			m_pApp->gbuffer.normal.GetView(),
+			m_pApp->gbuffer.txrGlobalPosition.GetView(),
 			m_pApp->txrDepth.GetView()
 		}
 	);
@@ -356,7 +417,7 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 	const float nearPlane = 0.3f;
 	const float farPlane = 3000.f;
 
-	m_pApp->mainCamera.PerspectiveProjection(90, VkGlobals::swapchain.width, VkGlobals::swapchain.height, nearPlane, farPlane);
+	m_pApp->mainCamera.PerspectiveProjection(120, VkGlobals::swapchain.width, VkGlobals::swapchain.height, nearPlane, farPlane);
 
 	m_pApp->constants.proj = m_pApp->mainCamera.Projection();
 	m_pApp->constants.proj_invert = m_pApp->constants.proj.inverted();
@@ -367,32 +428,42 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 	m_pApp->constants.frustum.x = nearPlane;
 	m_pApp->constants.frustum.y = farPlane;
 
-	Shader::WritePerFrameBuffer(m_pApp->constantBuffer, 0);
+	Shader::PerFrameDescriptors::Binder().UniformBuffer(m_pApp->constantBuffer, 0).Bind();
 
 
-
-	RenderState fullscreenState;
-	fullscreenState.cullMode = ECull::None;
-	fullscreenState.hasInputAttachment = false;
-
-	m_pApp->shaderLighting.SetState(m_pApp->lightingRenderpass, 0, 0, fullscreenState);
-	m_pApp->shaderLighting.WriteSampler(m_pApp->pointSampler, 0);
-	m_pApp->shaderLighting.WriteImage(m_pApp->gbuffer.diffuse, 0);
-	m_pApp->shaderLighting.WriteImage(m_pApp->gbuffer.normal, 1);
-	m_pApp->shaderLighting.WriteImage(m_pApp->ssao.txrSSAO, 2);
-	m_pApp->shaderLighting.WriteImage(m_pApp->txrDepth, 3, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL);
+	m_pApp->shaderLighting.SetState(m_pApp->lightingRenderpass, 0, 0, m_pApp->fullscreenState);
+	m_pApp->shaderLighting.Binder()
+			.ImageSampler(m_pApp->pointSampler, 0)
+			.Image(m_pApp->gbuffer.diffuse, 0)
+			.Image(m_pApp->gbuffer.normal, 1)
+			.Image(m_pApp->ssao.txrSSAO, 2)
+			.Image(m_pApp->txrDepth, 3, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL)
+			.Image(m_pApp->directionalShadow.txrShadowMask, 4)
+		.Bind();
 
 
-	m_pApp->shaderHDRTonemap.SetState(m_pApp->finalizeRenderpass, 0, 0, fullscreenState);
-	m_pApp->shaderHDRTonemap.WriteImage(m_pApp->txrHdrTarget, 0);
-	m_pApp->shaderHDRTonemap.WriteSampler(m_pApp->pointSampler, 0);
+	m_pApp->shaderHDRTonemap.SetState(m_pApp->finalizeRenderpass, 0, 0, m_pApp->fullscreenState);
+	m_pApp->shaderHDRTonemap.Binder()
+			.Image(m_pApp->txrHdrTarget, 0)
+			.ImageSampler(m_pApp->pointSampler, 0)
+		.Bind();
 
 
-	m_pApp->shaderSSAO.SetState(m_pApp->ssao.renderpass, 0, 0, fullscreenState);
-	m_pApp->shaderSSAO.WriteSampler(m_pApp->pointSampler, 0);
-	m_pApp->shaderSSAO.WriteImage(m_pApp->gbuffer.normal, 0);
-	m_pApp->shaderSSAO.WriteImage(m_pApp->txrDepth, 1, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL);
-	m_pApp->shaderSSAO.WriteStorageBufferReadonly(m_pApp->ssao.kernel, 2);
+	m_pApp->shaderSSAO.SetState(m_pApp->ssao.renderpass, 0, 0, m_pApp->fullscreenState);
+	m_pApp->shaderSSAO.Binder()
+			.ImageSampler(m_pApp->pointSampler, 0)
+			.Image(m_pApp->gbuffer.normal, 0)
+			.Image(m_pApp->txrDepth, 1, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL)
+			.StorageBufferReadonly(m_pApp->ssao.kernel, 2)
+		.Bind();
+
+
+	m_pApp->directionalShadow.shaderShadows.SetState(0, 0);
+	m_pApp->directionalShadow.shaderShadows.Binder()
+			.StorageImage(m_pApp->directionalShadow.txrShadowMask, 0)
+			.Image(m_pApp->gbuffer.txrGlobalPosition, 1)
+			.AccelerationStructure(m_pApp->directionalShadow.topAccStructure.Get(), 0)
+		.Bind();
 }
 
 void App::Render()
@@ -426,6 +497,8 @@ void App::Render()
 	GBufferPass();
 
 	SSAOPass();
+
+	RaytraceShadows();
 
 	LightingPass();
 
@@ -474,10 +547,11 @@ void App::Render()
 
 void App::GBufferPass()
 {
-	std::vector<VkClearValue> clearValues(3);
+	std::vector<VkClearValue> clearValues(4);
 	clearValues[0].color = { {0.3, 0.3, 0.3, 1} };
 	clearValues[1].color = { {0.5, 0.5, 0.5, 1} };
-	clearValues[2].depthStencil = { 1, 0 };
+	clearValues[2].color = { {0, 0, 0, 1} };
+	clearValues[3].depthStencil = { 1, 0 };
 
 	VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 	renderPassBegin.renderPass = m_pApp->gbuffer.renderpass;
@@ -496,28 +570,8 @@ void App::GBufferPass()
 		if (currentMaterialID != gpuMesh.materialId)
 		{
 			currentMaterialID = gpuMesh.materialId;
-			if (currentMaterialID == 50)
-			{
-				int a = 0;
-			}
 			m_pApp->shaderGBuffer.SetState(m_pApp->gbuffer.renderpass, m_pApp->materials[gpuMesh.materialId].flags, gpuMesh.materialId, RenderState());
-			std::vector<VkDescriptorSet> descriptorSets = { Shader::PerFrameDescriptors::vkDesciptorSet };
-			if (m_pApp->shaderGBuffer.HasPerDrawcallSet())
-			{
-				descriptorSets.push_back(m_pApp->shaderGBuffer.GetPerDrawCallSet());
-			}
-
-			vkCmdBindDescriptorSets(
-				m_pApp->commandBufer,
-				VK_PIPELINE_BIND_POINT_GRAPHICS,
-				m_pApp->shaderGBuffer.GetPipeStateObj().vkPipelineLayout,
-				0,
-				uint32_t(descriptorSets.size()),
-				descriptorSets.data(),
-				0, nullptr
-			);
-
-			vkCmdBindPipeline(m_pApp->commandBufer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pApp->shaderGBuffer.GetPipeStateObj().vkPipeline);
+			m_pApp->shaderGBuffer.Bind(m_pApp->commandBufer);
 		}
 
 		VkBuffer b[] = { gpuMesh.vertices };
@@ -532,10 +586,26 @@ void App::GBufferPass()
 
 void App::LightingPass()
 {
-	RenderState fullscreenState;
-	fullscreenState.cullMode = ECull::None;
-	fullscreenState.hasInputAttachment = false;
-	m_pApp->shaderLighting.SetState(m_pApp->lightingRenderpass, 0, 0, fullscreenState);
+	VkImageMemoryBarrier2 imgBarier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+	imgBarier.srcStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+	imgBarier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+	imgBarier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+	imgBarier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+	imgBarier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+	imgBarier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	imgBarier.image = m_pApp->directionalShadow.txrShadowMask.Get();
+	imgBarier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	imgBarier.subresourceRange.layerCount = 1;
+	imgBarier.subresourceRange.levelCount = 1;
+	imgBarier.subresourceRange.baseArrayLayer = 0;
+	imgBarier.subresourceRange.baseMipLevel = 0;
+
+	VkDependencyInfo depInfo = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+	depInfo.imageMemoryBarrierCount = 1;
+	depInfo.pImageMemoryBarriers = &imgBarier;
+	vkCmdPipelineBarrier2(m_pApp->commandBufer, &depInfo);
+
+	m_pApp->shaderLighting.SetState(m_pApp->lightingRenderpass, 0, 0, m_pApp->fullscreenState);
 
 	VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 	renderPassBegin.renderPass = m_pApp->lightingRenderpass;
@@ -545,38 +615,17 @@ void App::LightingPass()
 	vkCmdSetViewport(m_pApp->commandBufer, 0, 1, &m_pApp->viewport);
 	vkCmdSetScissor(m_pApp->commandBufer, 0, 1, &m_pApp->scissor);
 
+	m_pApp->shaderLighting.Bind(m_pApp->commandBufer);
 
-
-	const std::vector<VkDescriptorSet> descriptorSets = {
-		Shader::PerFrameDescriptors::vkDesciptorSet,
-		m_pApp->shaderLighting.GetPerDrawCallSet()
-	};
-
-	vkCmdBindDescriptorSets(
-		m_pApp->commandBufer,
-		VK_PIPELINE_BIND_POINT_GRAPHICS,
-		m_pApp->shaderLighting.GetPipeStateObj().vkPipelineLayout,
-		0,
-		uint32_t(descriptorSets.size()),
-		descriptorSets.data(),
-		0, nullptr
-	);
-
-	vkCmdBindPipeline(m_pApp->commandBufer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pApp->shaderLighting.GetPipeStateObj().vkPipeline);
 	vkCmdBindIndexBuffer(m_pApp->commandBufer, m_pApp->fullScreenIndecies, 0, VK_INDEX_TYPE_UINT32);
 	vkCmdDrawIndexed(m_pApp->commandBufer, 6, 1, 0, 0, 0);
-
-
 
 	vkCmdEndRenderPass(m_pApp->commandBufer);
 }
 
 void App::SSAOPass()
 {
-	RenderState fullscreenState;
-	fullscreenState.cullMode = ECull::None;
-	fullscreenState.hasInputAttachment = false;
-	m_pApp->shaderSSAO.SetState(m_pApp->ssao.renderpass, 0, 0, fullscreenState);
+	m_pApp->shaderSSAO.SetState(m_pApp->ssao.renderpass, 0, 0, m_pApp->fullscreenState);
 
 	std::vector<VkClearValue> clearValues(1);
 	clearValues[0].color = { {1, 1, 1, 1} };
@@ -591,38 +640,16 @@ void App::SSAOPass()
 	vkCmdSetViewport(m_pApp->commandBufer, 0, 1, &m_pApp->viewport);
 	vkCmdSetScissor(m_pApp->commandBufer, 0, 1, &m_pApp->scissor);
 
-
-
-	const std::vector<VkDescriptorSet> descriptorSets = {
-		Shader::PerFrameDescriptors::vkDesciptorSet,
-		m_pApp->shaderSSAO.GetPerDrawCallSet()
-	};
-
-	vkCmdBindDescriptorSets(
-		m_pApp->commandBufer,
-		VK_PIPELINE_BIND_POINT_GRAPHICS,
-		m_pApp->shaderSSAO.GetPipeStateObj().vkPipelineLayout,
-		0,
-		uint32_t(descriptorSets.size()),
-		descriptorSets.data(),
-		0, nullptr
-	);
-
-	vkCmdBindPipeline(m_pApp->commandBufer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pApp->shaderSSAO.GetPipeStateObj().vkPipeline);
+	m_pApp->shaderSSAO.Bind(m_pApp->commandBufer);
 	vkCmdBindIndexBuffer(m_pApp->commandBufer, m_pApp->fullScreenIndecies, 0, VK_INDEX_TYPE_UINT32);
 	vkCmdDrawIndexed(m_pApp->commandBufer, 6, 1, 0, 0, 0);
-
-
 
 	vkCmdEndRenderPass(m_pApp->commandBufer);
 }
 
 void App::FinalHDRPass()
 {
-	RenderState fullscreenState;
-	fullscreenState.cullMode = ECull::None;
-	fullscreenState.hasInputAttachment = false;
-	m_pApp->shaderHDRTonemap.SetState(m_pApp->finalizeRenderpass, 0, 0, fullscreenState);
+	m_pApp->shaderHDRTonemap.SetState(m_pApp->finalizeRenderpass, 0, 0, m_pApp->fullscreenState);
 
 
 	VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
@@ -633,26 +660,68 @@ void App::FinalHDRPass()
 	vkCmdSetViewport(m_pApp->commandBufer, 0, 1, &m_pApp->viewport);
 	vkCmdSetScissor(m_pApp->commandBufer, 0, 1, &m_pApp->scissor);
 
-	const std::vector<VkDescriptorSet> descriptorSets = {
-		Shader::PerFrameDescriptors::vkDesciptorSet,
-		m_pApp->shaderHDRTonemap.GetPerDrawCallSet()
-	};
+	m_pApp->shaderHDRTonemap.Bind(m_pApp->commandBufer);
 
-	vkCmdBindDescriptorSets(
-		m_pApp->commandBufer,
-		VK_PIPELINE_BIND_POINT_GRAPHICS,
-		m_pApp->shaderHDRTonemap.GetPipeStateObj().vkPipelineLayout,
-		0,
-		uint32_t(descriptorSets.size()),
-		descriptorSets.data(),
-		0, nullptr
-	);
-
-	vkCmdBindPipeline(m_pApp->commandBufer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pApp->shaderHDRTonemap.GetPipeStateObj().vkPipeline);
 	vkCmdBindIndexBuffer(m_pApp->commandBufer, m_pApp->fullScreenIndecies, 0, VK_INDEX_TYPE_UINT32);
 	vkCmdDrawIndexed(m_pApp->commandBufer, 6, 1, 0, 0, 0);
 
 	vkCmdEndRenderPass(m_pApp->commandBufer);
+}
+
+void App::RaytraceShadows()
+{
+	m_pApp->directionalShadow.shaderShadows.SetState(0, 0);
+
+
+
+	static bool isInitialized = false;
+	if (!isInitialized)
+	{
+		isInitialized = true;
+
+		VkImageMemoryBarrier2 imgBarier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+		imgBarier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+		imgBarier.srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+		imgBarier.dstStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+		imgBarier.dstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+		imgBarier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		imgBarier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		imgBarier.image = m_pApp->directionalShadow.txrShadowMask.Get();
+		imgBarier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		imgBarier.subresourceRange.layerCount = 1;
+		imgBarier.subresourceRange.levelCount = 1;
+		imgBarier.subresourceRange.baseArrayLayer = 0;
+		imgBarier.subresourceRange.baseMipLevel = 0;
+
+		VkDependencyInfo depInfo = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+		depInfo.imageMemoryBarrierCount = 1;
+		depInfo.pImageMemoryBarriers = &imgBarier;
+		vkCmdPipelineBarrier2(m_pApp->commandBufer, &depInfo);
+		return;
+	}
+
+	VkImageMemoryBarrier2 imgBarier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+	imgBarier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+	imgBarier.srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+	imgBarier.dstStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+	imgBarier.dstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+	imgBarier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	imgBarier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+	imgBarier.image = m_pApp->directionalShadow.txrShadowMask.Get();
+	imgBarier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	imgBarier.subresourceRange.layerCount = 1;
+	imgBarier.subresourceRange.levelCount = 1;
+	imgBarier.subresourceRange.baseArrayLayer = 0;
+	imgBarier.subresourceRange.baseMipLevel = 0;
+
+	VkDependencyInfo depInfo = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+	depInfo.imageMemoryBarrierCount = 1;
+	depInfo.pImageMemoryBarriers = &imgBarier;
+	vkCmdPipelineBarrier2(m_pApp->commandBufer, &depInfo);
+
+
+	m_pApp->directionalShadow.shaderShadows.Bind(m_pApp->commandBufer);
+	m_pApp->directionalShadow.shaderShadows.Draw(m_pApp->commandBufer, VkGlobals::swapchain.width, VkGlobals::swapchain.height);
 }
 
 

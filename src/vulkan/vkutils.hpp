@@ -95,6 +95,9 @@ inline auto to_vk_enum(EShaderType e)
 	{
 	case EShaderType::Fragment: return VK_SHADER_STAGE_FRAGMENT_BIT;
 	case EShaderType::Compute: return VK_SHADER_STAGE_COMPUTE_BIT;
+	case EShaderType::RayGeneration: return VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+	case EShaderType::RayMiss: return VK_SHADER_STAGE_MISS_BIT_KHR;
+	case EShaderType::RayClosestHit: return VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
 	default: return VK_SHADER_STAGE_VERTEX_BIT;
 	}
 }

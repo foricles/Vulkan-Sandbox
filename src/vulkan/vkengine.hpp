@@ -58,7 +58,7 @@ public:
 	static VkCommandBuffer CreateCommandBuffer();
 	static void DestroyCommandBuffer(VkCommandBuffer& vkCommandBuffer);
 
-	static VkDeviceMemory AllocateMemory(VkBuffer vkBuffer, VkMemoryPropertyFlags properties);
+	static VkDeviceMemory AllocateMemory(VkBuffer vkBuffer, VkMemoryPropertyFlags properties, VkMemoryAllocateFlagBits flags = VK_MEMORY_ALLOCATE_FLAG_BITS_MAX_ENUM);
 	static VkDeviceMemory AllocateMemory(VkImage vkImage, VkMemoryPropertyFlags properties);
 	static void SubmitOnce(std::function<void(VkCommandBuffer)> callback, VkCommandPool commandPool = VK_NULL_HANDLE);
 

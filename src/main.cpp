@@ -88,58 +88,62 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     switch (uMsg)
     {
-    case WM_CREATE:
-    {
+        case WM_CREATE:
+        {
 
-#ifdef _DEBUG
-        const VulkanEngine::list layers = { "VK_LAYER_KHRONOS_validation" };
-        const VulkanEngine::list extensions = { VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_EXTENSION_NAME };
-#else
-        const VulkanEngine::list layers = { };
-        const VulkanEngine::list extensions = { VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME };
-#endif // _DEBUG
+    #ifdef _DEBUG
+            const VulkanEngine::list layers = { "VK_LAYER_KHRONOS_validation" };
+            const VulkanEngine::list extensions = { VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_EXTENSION_NAME };
+    #else
+            const VulkanEngine::list layers = { };
+            const VulkanEngine::list extensions = { VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME };
+    #endif // _DEBUG
 
-        VulkanEngine::list devextensions = {
-            VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-            VK_KHR_MAINTENANCE_4_EXTENSION_NAME,
-            VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
-            VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME,
-            VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME
-        };
+            VulkanEngine::list devextensions = {
+                VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+                VK_KHR_MAINTENANCE_4_EXTENSION_NAME,
+                VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+                VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME,
+                VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME,
+                VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+                VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+                VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+                VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+            };
 
-#ifdef _DEBUG
-        const VulkanEngine::list devlayers = { };
-#else
-        const VulkanEngine::list devlayers = { };
-#endif // _DEBUG
+    #ifdef _DEBUG
+            const VulkanEngine::list devlayers = { };
+    #else
+            const VulkanEngine::list devlayers = { };
+    #endif // _DEBUG
 
-        VulkanEngine::InitInstance(extensions, layers);
-        VulkanEngine::InitSurface(hwnd, GetModuleHandle(NULL), devextensions, devlayers);
+            VulkanEngine::InitInstance(extensions, layers);
+            VulkanEngine::InitSurface(hwnd, GetModuleHandle(NULL), devextensions, devlayers);
 
-        App::Get().Init();
-        break;
-    }
-    case WM_SIZE:
-    {
-        VulkanEngine::UpdateSwapchain(LOWORD(lParam), HIWORD(lParam));
-        App::Get().OnWidowResize(LOWORD(lParam), HIWORD(lParam));
-        break;
-    }
-    case WM_SYSKEYDOWN:
-    case WM_KEYDOWN:
-    {
-        App::Get().Input.OnKeyDown(uint32_t(wParam));
-        break;
-    }
-    case WM_SYSKEYUP:
-    case WM_KEYUP:
-    {
-        App::Get().Input.OnKeyUp(uint32_t(wParam));
-        break;
-    }
-    case WM_DESTROY:
-    {
-        App::Get().Shutdown();
+            App::Get().Init();
+            break;
+        }
+        case WM_SIZE:
+        {
+            VulkanEngine::UpdateSwapchain(LOWORD(lParam), HIWORD(lParam));
+            App::Get().OnWidowResize(LOWORD(lParam), HIWORD(lParam));
+            break;
+        }
+        case WM_SYSKEYDOWN:
+        case WM_KEYDOWN:
+        {
+            App::Get().Input.OnKeyDown(uint32_t(wParam));
+            break;
+        }
+        case WM_SYSKEYUP:
+        case WM_KEYUP:
+        {
+            App::Get().Input.OnKeyUp(uint32_t(wParam));
+            break;
+        }
+        case WM_DESTROY:
+        {
+            App::Get().Shutdown();
             VulkanEngine::Shutdown();
             PostQuitMessage(0);
             break;

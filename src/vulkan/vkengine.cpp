@@ -45,12 +45,23 @@ void VulkanEngine::InitInstance(const list& extensions, const list& layers)
     applicationInfo.apiVersion = VK_API_VERSION_1_3;
 
 
+
 	VkInstanceCreateInfo instanceInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     instanceInfo.pApplicationInfo = &applicationInfo;
     instanceInfo.ppEnabledLayerNames = layers.data();
     instanceInfo.ppEnabledExtensionNames = extensions.data();
     instanceInfo.enabledLayerCount = uint32_t(layers.size());
     instanceInfo.enabledExtensionCount = uint32_t(extensions.size());
+
+#ifdef _DEBUG
+
+    VkValidationFeatureEnableEXT enabledValidationFeatures[] = { VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT };
+    VkValidationFeaturesEXT validationFeatures = { VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT };
+    validationFeatures.enabledValidationFeatureCount = 1;
+    validationFeatures.pEnabledValidationFeatures = enabledValidationFeatures;
+    instanceInfo.pNext = &validationFeatures;
+
+#endif
 
     VK_ASSERT(vkCreateInstance(&instanceInfo, VkGlobals::vkAllocatorCallback, &VkGlobals::vkInstance));
 
@@ -59,8 +70,9 @@ void VulkanEngine::InitInstance(const list& extensions, const list& layers)
     std::cout << "=== Create debug messenger ===" << std::endl;
 
     VkDebugUtilsMessengerCreateInfoEXT debugInfo = { VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT };
-    debugInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    debugInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT;
     debugInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+    debugInfo.flags = VK_DEBUG_REPORT_INFORMATION_BIT_EXT;
     debugInfo.pfnUserCallback = DebugCallback;
 
     PFN_vkCreateDebugUtilsMessengerEXT createDebugFoo = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(VkGlobals::vkInstance, "vkCreateDebugUtilsMessengerEXT");
@@ -161,9 +173,20 @@ void VulkanEngine::CreateDevice(const list& devextensions, const list& devlayers
     deviceQueueInfo.queueCount = 1;
     deviceQueueInfo.pQueuePriorities = &fPriority;
 
+    VkPhysicalDeviceBufferDeviceAddressFeatures bufferAddress = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES };
+    bufferAddress.bufferDeviceAddress = VK_TRUE;
+
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR raytraccingFeature = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR };
+    raytraccingFeature.rayTracingPipeline = VK_TRUE;
+    raytraccingFeature.pNext = &bufferAddress;
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationFeature = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
+    accelerationFeature.accelerationStructure = VK_TRUE;
+    accelerationFeature.pNext = &raytraccingFeature;
 
     VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures separateDepthStencil = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES };
     separateDepthStencil.separateDepthStencilLayouts = VK_TRUE;
+    separateDepthStencil.pNext = &accelerationFeature;
 
     VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures demoteFeature = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES };
     demoteFeature.shaderDemoteToHelperInvocation = VK_TRUE;
@@ -470,13 +493,21 @@ void VulkanEngine::DestroyCommandBuffer(VkCommandBuffer& vkCommandBuffer)
     vkCommandBuffer = VK_NULL_HANDLE;
 }
 
-VkDeviceMemory VulkanEngine::AllocateMemory(VkBuffer vkBuffer, VkMemoryPropertyFlags properties)
+VkDeviceMemory VulkanEngine::AllocateMemory(VkBuffer vkBuffer, VkMemoryPropertyFlags properties, VkMemoryAllocateFlagBits flags)
 {
     VkMemoryRequirements requirements = {};
     vkGetBufferMemoryRequirements(VkGlobals::vkDevice, vkBuffer, &requirements);
 
+    VkMemoryAllocateFlagsInfo allocateFlags = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO };
+    allocateFlags.flags = flags;
+
     VkMemoryAllocateInfo allocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
     allocInfo.allocationSize = requirements.size;
+
+    if (flags != VK_MEMORY_ALLOCATE_FLAG_BITS_MAX_ENUM)
+    {
+        allocInfo.pNext = &allocateFlags;
+    }
 
     VkPhysicalDeviceMemoryProperties memProperties;
     vkGetPhysicalDeviceMemoryProperties(VkGlobals::vkGPU, &memProperties);
