@@ -55,8 +55,10 @@ void ShaderCompute::SetState(uint64_t bitmask, uint32_t descriptorSetMask)
 
 void ShaderCompute::CreateComputePso(VulkanShader& shader, PipeStateObj& pipelineStateObject)
 {
+	CreatePipelineLayout(shader, pipelineStateObject);
 	VkComputePipelineCreateInfo computeInfo = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
 	computeInfo.stage = shader.shaderStages[0];
 	computeInfo.layout = pipelineStateObject.vkPipelineLayout;
 	VK_ASSERT(vkCreateComputePipelines(VkGlobals::vkDevice, VK_NULL_HANDLE, 1, &computeInfo, VkGlobals::vkAllocatorCallback, &pipelineStateObject.vkPipeline));
+	m_psoCache = &pipelineStateObject;
 }

@@ -5,6 +5,7 @@
 #include "../vulkan/vkutils.hpp"
 #include "../vulkan/vkrenderpass.hpp"
 #include "../vulkan/shader/graphicshader.hpp"
+#include "../vulkan/shader/computeshader.hpp"
 #include "../vulkan/shader/raytraceshader.hpp"
 #include "../vulkan/vktexture.hpp"
 #include "../vulkan/vkbuffer.hpp"
@@ -80,6 +81,16 @@ struct DirectShadow
 	AccelerationStructure bottomAccStructure;
 };
 
+struct Skybox
+{
+	Texture txrSkybox;
+	ShaderCompute shaderEqiToCube;
+	ShaderGraphics shaderSkybox;
+	Buffer cubeIndecies{ EBufferType::Index };
+	Renderpass rederpass;
+	Framebuffer framebuffer;
+};
+
 struct AppPimpl
 {
 	uint32_t swapchainImage{ 0 };
@@ -119,6 +130,8 @@ struct AppPimpl
 
 	DirectShadow directionalShadow;
 	Camera mainCamera;
+
+	Skybox skybox;
 
 	std::vector<GpuMesh> meshesToDraw;
 	std::unordered_map<uint32_t, GpuMaterial> materials;
@@ -173,15 +186,26 @@ void App::Init()
 		m_pApp->directionalShadow.shaderShadows.MarkProgram(EShaderType::RayGeneration, "RayGenerationRS");
 		m_pApp->directionalShadow.shaderShadows.MarkProgram(EShaderType::RayClosestHit, "CloseHitRS");
 		m_pApp->directionalShadow.shaderShadows.MarkProgram(EShaderType::RayMiss, "MissRS");
-		m_pApp->directionalShadow.shaderShadows.SetState(0, 0);
+	}
+	{
+		auto data = helpers::sb_read_file("shaders\\equirecttocube.almfx");
+		m_pApp->skybox.shaderEqiToCube.SetSource(reinterpret_cast<char*>(data.data()));
+		m_pApp->skybox.shaderEqiToCube.MarkProgram(EShaderType::Compute, "MainCS");
+	}
+	{
+		auto data = helpers::sb_read_file("shaders\\skybox.almfx");
+		m_pApp->skybox.shaderSkybox.SetSource(reinterpret_cast<char*>(data.data()));
+		m_pApp->skybox.shaderSkybox.MarkProgram(EShaderType::Vertex, "MainVS");
+		m_pApp->skybox.shaderSkybox.MarkProgram(EShaderType::Fragment, "MainPS");
 	}
 
 	m_pApp->fullScreenIndecies.Load(std::vector<uint32_t>{0, 1, 2, 1, 3, 2});
+	m_pApp->skybox.cubeIndecies.Load(std::vector<uint32_t>{0, 1, 2, 2, 3, 1, 4, 5, 6, 6, 7, 5, 8, 9, 10, 10, 11, 9, 12, 13, 14, 14, 15, 13, 16, 17, 18, 18, 19, 17, 20, 21, 22, 22, 23, 21});
 
 	m_pApp->constants.directionLight = math::vec4(1, -1, 0, 1);
 	m_pApp->constants.view = math::mat4(1);
-	m_pApp->constants.hdrTonemap.x = 2.2f;
-	m_pApp->constants.hdrTonemap.y = 0.3f;
+	m_pApp->constants.hdrTonemap.x = 0.9f;
+	m_pApp->constants.hdrTonemap.y = 3.2f;
 
 	m_pApp->constantBuffer.Load(&m_pApp->constants, sizeof(ConstantBuffer));
 
@@ -286,46 +310,14 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 	m_pApp->scissor.offset = { 0, 0 };
 	m_pApp->scissor.extent = { VkGlobals::swapchain.width , VkGlobals::swapchain.height };
 
-	m_pApp->gbuffer.diffuse.Create(
-		VkGlobals::swapchain.width,
-		VkGlobals::swapchain.height,
-		EPixelFormat::RGBA
-	);
 
-	m_pApp->gbuffer.normal.Create(
-		VkGlobals::swapchain.width,
-		VkGlobals::swapchain.height,
-		EPixelFormat::RGBA
-	);
-	m_pApp->gbuffer.txrGlobalPosition.Create(
-		VkGlobals::swapchain.width,
-		VkGlobals::swapchain.height,
-		EPixelFormat::RGBA32
-	);
-
-	m_pApp->txrHdrTarget.Create(
-		VkGlobals::swapchain.width,
-		VkGlobals::swapchain.height,
-		EPixelFormat::RGBA16
-	);
-
-	m_pApp->ssao.txrSSAO.Create(
-		VkGlobals::swapchain.width,
-		VkGlobals::swapchain.height,
-		EPixelFormat::Mono
-	);
-
-	m_pApp->txrDepth.Create(
-		VkGlobals::swapchain.width,
-		VkGlobals::swapchain.height,
-		EPixelFormat::D32
-	);
-
-	m_pApp->directionalShadow.txrShadowMask.Create(
-		VkGlobals::swapchain.width,
-		VkGlobals::swapchain.height,
-		EPixelFormat::Mono
-	);
+	m_pApp->txrDepth.Create(VkGlobals::swapchain.width, VkGlobals::swapchain.height, EPixelFormat::D32);
+	m_pApp->txrHdrTarget.Create(VkGlobals::swapchain.width, VkGlobals::swapchain.height, EPixelFormat::RGBA16);
+	m_pApp->ssao.txrSSAO.Create(VkGlobals::swapchain.width, VkGlobals::swapchain.height, EPixelFormat::Mono);
+	m_pApp->gbuffer.normal.Create(VkGlobals::swapchain.width, VkGlobals::swapchain.height, EPixelFormat::RGBA);
+	m_pApp->gbuffer.diffuse.Create(VkGlobals::swapchain.width, VkGlobals::swapchain.height, EPixelFormat::RGBA);
+	m_pApp->gbuffer.txrGlobalPosition.Create(VkGlobals::swapchain.width, VkGlobals::swapchain.height, EPixelFormat::RGBA32);
+	m_pApp->directionalShadow.txrShadowMask.Create(VkGlobals::swapchain.width, VkGlobals::swapchain.height, EPixelFormat::Mono);
 
 	if (!m_isRenderInit)
 	{
@@ -354,6 +346,12 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 
 		m_pApp->finalizeRenderpass = RenderpassBuilder()
 			.AddAttachment(VkGlobals::swapchain.format.format, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+			.Create();
+
+		m_pApp->skybox.rederpass = RenderpassBuilder()
+			.AddAttachment(EPixelFormat::RGBA16, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+			.AddAttachment(EPixelFormat::D32, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL)
+				.IsDepth()
 			.Create();
 
 		for (auto& gpuMaterial : m_pApp->materials)
@@ -403,6 +401,12 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 		VkGlobals::swapchain.width,
 		VkGlobals::swapchain.height,
 		{ m_pApp->ssao.txrSSAO.GetView() }
+	);
+
+	m_pApp->skybox.framebuffer = m_pApp->skybox.rederpass.CreateFramebuffer(
+		VkGlobals::swapchain.width,
+		VkGlobals::swapchain.height,
+		{ m_pApp->txrHdrTarget.GetView(), m_pApp->txrDepth.GetView() }
 	);
 
 	for (uint32_t i(0); i < VulkanEngine::kSwapchainImageCount; ++i)
@@ -494,6 +498,7 @@ void App::Render()
 	vkCmdResetQueryPool(m_pApp->commandBufer, VkGlobals::vkQueryPool, 0, VulkanEngine::kQueryCount);
 	vkCmdWriteTimestamp(m_pApp->commandBufer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VkGlobals::vkQueryPool, 0);
 
+
 	GBufferPass();
 
 	SSAOPass();
@@ -501,6 +506,8 @@ void App::Render()
 	RaytraceShadows();
 
 	LightingPass();
+
+	DrawSkybox();
 
 	FinalHDRPass();
 
@@ -586,24 +593,11 @@ void App::GBufferPass()
 
 void App::LightingPass()
 {
-	VkImageMemoryBarrier2 imgBarier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
-	imgBarier.srcStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
-	imgBarier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
-	imgBarier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-	imgBarier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-	imgBarier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-	imgBarier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	imgBarier.image = m_pApp->directionalShadow.txrShadowMask.Get();
-	imgBarier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	imgBarier.subresourceRange.layerCount = 1;
-	imgBarier.subresourceRange.levelCount = 1;
-	imgBarier.subresourceRange.baseArrayLayer = 0;
-	imgBarier.subresourceRange.baseMipLevel = 0;
-
-	VkDependencyInfo depInfo = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-	depInfo.imageMemoryBarrierCount = 1;
-	depInfo.pImageMemoryBarriers = &imgBarier;
-	vkCmdPipelineBarrier2(m_pApp->commandBufer, &depInfo);
+	m_pApp->directionalShadow.txrShadowMask.SetBarier(m_pApp->commandBufer,
+		VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_WRITE_BIT,
+		VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+	);
 
 	m_pApp->shaderLighting.SetState(m_pApp->lightingRenderpass, 0, 0, m_pApp->fullscreenState);
 
@@ -670,60 +664,93 @@ void App::FinalHDRPass()
 
 void App::RaytraceShadows()
 {
+	m_pApp->directionalShadow.txrShadowMask.SetBarier(m_pApp->commandBufer,
+		VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+		VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_2_SHADER_WRITE_BIT,
+		VK_IMAGE_LAYOUT_GENERAL
+	);
+
 	m_pApp->directionalShadow.shaderShadows.SetState(0, 0);
-
-
-
-	static bool isInitialized = false;
-	if (!isInitialized)
-	{
-		isInitialized = true;
-
-		VkImageMemoryBarrier2 imgBarier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
-		imgBarier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-		imgBarier.srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-		imgBarier.dstStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
-		imgBarier.dstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
-		imgBarier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		imgBarier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-		imgBarier.image = m_pApp->directionalShadow.txrShadowMask.Get();
-		imgBarier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		imgBarier.subresourceRange.layerCount = 1;
-		imgBarier.subresourceRange.levelCount = 1;
-		imgBarier.subresourceRange.baseArrayLayer = 0;
-		imgBarier.subresourceRange.baseMipLevel = 0;
-
-		VkDependencyInfo depInfo = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-		depInfo.imageMemoryBarrierCount = 1;
-		depInfo.pImageMemoryBarriers = &imgBarier;
-		vkCmdPipelineBarrier2(m_pApp->commandBufer, &depInfo);
-		return;
-	}
-
-	VkImageMemoryBarrier2 imgBarier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
-	imgBarier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-	imgBarier.srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-	imgBarier.dstStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
-	imgBarier.dstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
-	imgBarier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	imgBarier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-	imgBarier.image = m_pApp->directionalShadow.txrShadowMask.Get();
-	imgBarier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	imgBarier.subresourceRange.layerCount = 1;
-	imgBarier.subresourceRange.levelCount = 1;
-	imgBarier.subresourceRange.baseArrayLayer = 0;
-	imgBarier.subresourceRange.baseMipLevel = 0;
-
-	VkDependencyInfo depInfo = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-	depInfo.imageMemoryBarrierCount = 1;
-	depInfo.pImageMemoryBarriers = &imgBarier;
-	vkCmdPipelineBarrier2(m_pApp->commandBufer, &depInfo);
-
 
 	m_pApp->directionalShadow.shaderShadows.Bind(m_pApp->commandBufer);
 	m_pApp->directionalShadow.shaderShadows.Draw(m_pApp->commandBufer, VkGlobals::swapchain.width, VkGlobals::swapchain.height);
 }
 
+void App::DrawSkybox()
+{
+	RenderState renderstate;
+	renderstate.cullMode = ECull::None;
+	renderstate.depthFunc = EDepthFunc::LessEqual;
+	m_pApp->skybox.shaderSkybox.SetState(m_pApp->skybox.rederpass, 0, 0, renderstate);
+
+	static int startup = 0;
+	static Texture hdisource;
+	if (startup == 0)
+	{
+		RawTexture rwtex;
+		ModelLoader::LoadTexture(rwtex, "skyhdr\\sunset.png");
+		hdisource.Load(rwtex.data, rwtex.width, rwtex.height, EPixelFormat::RGBA);
+
+		hdisource.SetBarier(m_pApp->commandBufer,
+			VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+			VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+		);
+
+		m_pApp->skybox.txrSkybox.CreateCube(1024, 1024, EPixelFormat::RGBA);
+		m_pApp->skybox.txrSkybox.SetViewType(VK_IMAGE_VIEW_TYPE_2D_ARRAY);
+		m_pApp->skybox.txrSkybox.SetBarier(m_pApp->commandBufer,
+			VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+			VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+			VK_IMAGE_LAYOUT_GENERAL
+		);
+
+		m_pApp->skybox.shaderEqiToCube.SetState(0, 0);
+		m_pApp->skybox.shaderEqiToCube.Binder()
+			.StorageImage(m_pApp->skybox.txrSkybox, 0)
+			.ImageSampler(m_pApp->linearSampler, 0)
+			.Image(hdisource, 0)
+			.Bind();
+
+		m_pApp->skybox.shaderEqiToCube.Bind(m_pApp->commandBufer);
+		vkCmdDispatch(m_pApp->commandBufer, 32, 32, 6);
+	}
+	else if (startup == 1)
+	{
+		m_pApp->skybox.txrSkybox.SetViewType(VK_IMAGE_VIEW_TYPE_CUBE);
+		m_pApp->skybox.txrSkybox.SetBarier(m_pApp->commandBufer,
+			VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+			VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+		);
+	}
+	else
+	{
+		if (startup == 2)
+		{
+			m_pApp->skybox.shaderSkybox.Binder()
+				.ImageSampler(m_pApp->linearSampler, 0)
+				.Image(m_pApp->skybox.txrSkybox, 0)
+				.Bind();
+		}
+
+		VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+		renderPassBegin.renderPass = m_pApp->skybox.rederpass;
+		renderPassBegin.framebuffer = m_pApp->skybox.framebuffer;
+		renderPassBegin.renderArea = m_pApp->rndArea;
+		vkCmdBeginRenderPass(m_pApp->commandBufer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
+		vkCmdSetViewport(m_pApp->commandBufer, 0, 1, &m_pApp->viewport);
+		vkCmdSetScissor(m_pApp->commandBufer, 0, 1, &m_pApp->scissor);
+
+		m_pApp->skybox.shaderSkybox.Bind(m_pApp->commandBufer);
+
+		vkCmdBindIndexBuffer(m_pApp->commandBufer, m_pApp->skybox.cubeIndecies, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdDrawIndexed(m_pApp->commandBufer, 36, 1, 0, 0, 0);
+
+		vkCmdEndRenderPass(m_pApp->commandBufer);
+	}
+	++startup;
+}
 
 App::App()
 	: m_pApp(nullptr)
@@ -810,4 +837,19 @@ void App::Update(float dt)
 	{
 		m_pApp->constants.hdrTonemap.y -= dt;
 	}
+
+	static float lightRot = 0;
+	if (Input.KeyPressed(EKeys::F5))
+	{
+		lightRot += dt;
+	}
+	if (Input.KeyPressed(EKeys::F6))
+	{
+		lightRot -= dt;
+	}
+	
+	math::vec3 rot = math::quaternion::euler(math::vec3(0, lightRot, 0)).apply_rot(math::vec3(1, -1, 0));
+	m_pApp->constants.directionLight.x = rot.x;
+	m_pApp->constants.directionLight.y = rot.y;
+	m_pApp->constants.directionLight.z = rot.z;
 }

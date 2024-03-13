@@ -62,7 +62,7 @@ inline void ReadMeshFromNode(aiMesh* pMesh, const aiMatrix4x4& mat, Mesh& mesh)
 	}
 }
 #include <iostream>
-inline void LoadTexture(RawTexture& texture, std::string_view path)
+void ModelLoader::LoadTexture(RawTexture& texture, std::string_view path)
 {
 	int width{ 0 }, height{ 0 }, chanels{ 0 };
 	if (1 == stbi_info(path.data(), &width, &height, &chanels))
@@ -109,7 +109,7 @@ inline void ReadMaterial(Material& material, const std::filesystem::path& path, 
 
 			std::string parentPath = (path / std::filesystem::path(texturePath.C_Str()).filename()).string();
 
-			LoadTexture(material.diffuseTexture, (path / std::filesystem::path(texturePath.C_Str()).filename()).string());
+			ModelLoader::LoadTexture(material.diffuseTexture, (path / std::filesystem::path(texturePath.C_Str()).filename()).string());
 		}
 	}
 	else if (pMaterial->GetTextureCount(aiTextureType_BASE_COLOR) > 0)
@@ -121,7 +121,7 @@ inline void ReadMaterial(Material& material, const std::filesystem::path& path, 
 
 			std::string parentPath = (path / std::filesystem::path(texturePath.C_Str()).filename()).string();
 
-			LoadTexture(material.diffuseTexture, (path / std::filesystem::path(texturePath.C_Str()).filename()).string());
+			ModelLoader::LoadTexture(material.diffuseTexture, (path / std::filesystem::path(texturePath.C_Str()).filename()).string());
 		}
 	}
 
@@ -134,7 +134,7 @@ inline void ReadMaterial(Material& material, const std::filesystem::path& path, 
 
 			std::string parentPath = (path / std::filesystem::path(texturePath.C_Str()).filename()).string();
 
-			LoadTexture(material.normalTexture, (path / std::filesystem::path(texturePath.C_Str()).filename()).string());
+			ModelLoader::LoadTexture(material.normalTexture, (path / std::filesystem::path(texturePath.C_Str()).filename()).string());
 		}
 	}
 }

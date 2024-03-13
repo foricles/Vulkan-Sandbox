@@ -40,4 +40,5 @@ class ModelLoader
 {
 public:
 	Model Load(std::string_view pilepath);
+	static void LoadTexture(RawTexture& texture, std::string_view path);
 };

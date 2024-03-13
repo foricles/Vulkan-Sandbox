@@ -6,10 +6,14 @@
 Texture::Texture()
 	: m_width(0)
 	, m_height(0)
-	, m_format(VK_FORMAT_R8_UNORM)
+	, m_mipLevels(0)
+	, m_layerCount(0)
+    , m_format(VK_FORMAT_R8_UNORM)
 	, m_vkImage(VK_NULL_HANDLE)
 	, m_vkImageView(VK_NULL_HANDLE)
-    , m_vkImageMemory(VK_NULL_HANDLE)
+	, m_vkImageMemory(VK_NULL_HANDLE)
+    , m_currentLayout(VK_IMAGE_LAYOUT_UNDEFINED)
+    , m_aspect(VK_IMAGE_ASPECT_COLOR_BIT)
 {
 }
 
@@ -19,12 +23,72 @@ Texture::~Texture()
 }
 
 Texture::Texture(Texture&& texture) noexcept
+    : m_width(texture.m_width)
+    , m_height(texture.m_height)
+    , m_mipLevels(texture.m_mipLevels)
+    , m_layerCount(texture.m_layerCount)
+    , m_format(texture.m_format)
+    , m_vkImage(texture.m_vkImage)
+    , m_vkImageView(texture.m_vkImageView)
+    , m_vkImageMemory(texture.m_vkImageMemory)
+    , m_currentLayout(texture.m_currentLayout)
+    , m_aspect(texture.m_aspect)
 {
+    texture.m_width = 0;
+    texture.m_height = 0;
+    texture.m_mipLevels = 0;
+    texture.m_layerCount = 0;
+    texture.m_format = VK_FORMAT_R8_UNORM;
+    texture.m_vkImage = VK_NULL_HANDLE;
+    texture.m_vkImageView = VK_NULL_HANDLE;
+    texture.m_vkImageMemory = VK_NULL_HANDLE;
+    texture.m_currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    texture.m_aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 }
 
 Texture& Texture::operator=(Texture&& texture) noexcept
 {
-    return *this;
+    std::swap(m_width, texture.m_width);
+    std::swap(m_height, texture.m_height);
+    std::swap(m_mipLevels, texture.m_mipLevels);
+    std::swap(m_layerCount, texture.m_layerCount);
+    std::swap(m_format, texture.m_format);
+    std::swap(m_vkImage, texture.m_vkImage);
+    std::swap(m_vkImageView, texture.m_vkImageView);
+    std::swap(m_vkImageMemory, texture.m_vkImageMemory);
+    std::swap(m_currentLayout, texture.m_currentLayout);
+    std::swap(m_aspect, texture.m_aspect);
+    return *this;;
+}
+
+void Texture::CreateCube(uint32_t width, uint32_t height, EPixelFormat format)
+{
+    m_width = width;
+    m_height = height;
+    m_mipLevels = 1;
+    m_layerCount = 6;
+    m_format = to_vk_enum(format);
+    m_aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+
+    VkImageCreateInfo imageCreateInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageCreateInfo.format = m_format;
+    imageCreateInfo.extent.width = width;
+    imageCreateInfo.extent.height = height;
+    imageCreateInfo.extent.depth = 1;
+    imageCreateInfo.mipLevels = 1;
+    imageCreateInfo.arrayLayers = 6;
+    imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageCreateInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+    imageCreateInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+
+    VK_ASSERT(vkCreateImage(VkGlobals::vkDevice, &imageCreateInfo, VkGlobals::vkAllocatorCallback, &m_vkImage));
+
+    m_vkImageMemory = VulkanEngine::AllocateMemory(m_vkImage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VK_ASSERT(vkBindImageMemory(VkGlobals::vkDevice, m_vkImage, m_vkImageMemory, VkDeviceSize(0)));
 }
 
 void Texture::Create(uint32_t width, uint32_t height, EPixelFormat format, uint32_t mip)
@@ -36,7 +100,10 @@ void Texture::Create(uint32_t width, uint32_t height, VkFormat format, uint32_t 
 {
     m_width = width;
     m_height = height;
+    m_mipLevels = mip;
+    m_layerCount = 1;
     m_format = format;
+    m_aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 
     if (m_vkImage != VK_NULL_HANDLE)
     {
@@ -80,16 +147,17 @@ void Texture::Create(uint32_t width, uint32_t height, VkFormat format, uint32_t 
     imageViewInfo.subresourceRange.layerCount = 1;
     imageViewInfo.subresourceRange.baseMipLevel = 0;
     imageViewInfo.subresourceRange.baseArrayLayer = 0;
-    imageViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
     if (IsDepth())
     {
-        imageViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        m_aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
     }
     else if (IsDepthStencil())
     {
-        imageViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        m_aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
     }
+
+    imageViewInfo.subresourceRange.aspectMask = m_aspect;
 
     VK_ASSERT(vkCreateImageView(VkGlobals::vkDevice, &imageViewInfo, VkGlobals::vkAllocatorCallback, &m_vkImageView));
 }
@@ -277,6 +345,59 @@ void Texture::Free()
         vkDestroyImage(VkGlobals::vkDevice, m_vkImage, VkGlobals::vkAllocatorCallback);
         m_vkImage = VK_NULL_HANDLE;
     }
+}
+
+void Texture::SetViewType(VkImageViewType type)
+{
+    if (m_vkImageView != VK_NULL_HANDLE)
+    {
+        vkDestroyImageView(VkGlobals::vkDevice, m_vkImageView, VkGlobals::vkAllocatorCallback);
+        m_vkImageView = VK_NULL_HANDLE;
+    }
+
+    VkImageViewCreateInfo imageViewInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    imageViewInfo.image = m_vkImage;
+    imageViewInfo.viewType = type;
+    imageViewInfo.format = m_format;
+    imageViewInfo.subresourceRange.levelCount = m_mipLevels;
+    imageViewInfo.subresourceRange.layerCount = m_layerCount;
+    imageViewInfo.subresourceRange.aspectMask = m_aspect;
+    imageViewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    imageViewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    imageViewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    imageViewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    imageViewInfo.subresourceRange.baseMipLevel = 0;
+    imageViewInfo.subresourceRange.baseArrayLayer = 0;
+    VK_ASSERT(vkCreateImageView(VkGlobals::vkDevice, &imageViewInfo, VkGlobals::vkAllocatorCallback, &m_vkImageView));
+}
+
+void Texture::SetBarier(VkCommandBuffer commandBuffer,
+    VkPipelineStageFlags2 srcStageMask,
+    VkAccessFlags2 srcAccessMask,
+    VkPipelineStageFlags2 dstStageMask,
+    VkAccessFlags2 dstAccessMask,
+    VkImageLayout newLayout)
+{
+    VkImageMemoryBarrier2 imgBarier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+    imgBarier.srcStageMask = srcStageMask;
+    imgBarier.srcAccessMask = srcAccessMask;
+    imgBarier.dstStageMask = dstStageMask;
+    imgBarier.dstAccessMask = dstAccessMask;
+    imgBarier.oldLayout = m_currentLayout;
+    imgBarier.newLayout = newLayout;
+    imgBarier.image = m_vkImage;
+    imgBarier.subresourceRange.aspectMask = m_aspect;
+    imgBarier.subresourceRange.layerCount = m_layerCount;
+    imgBarier.subresourceRange.levelCount = m_mipLevels;
+    imgBarier.subresourceRange.baseArrayLayer = 0;
+    imgBarier.subresourceRange.baseMipLevel = 0;
+
+    VkDependencyInfo depInfo = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    depInfo.imageMemoryBarrierCount = 1;
+    depInfo.pImageMemoryBarriers = &imgBarier;
+    vkCmdPipelineBarrier2(commandBuffer, &depInfo);
+
+    m_currentLayout = newLayout;
 }
 
 

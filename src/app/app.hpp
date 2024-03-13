@@ -29,6 +29,7 @@ private:
 	void RaytraceShadows();
 	void LightingPass();
 	void SSAOPass();
+	void DrawSkybox();
 	void FinalHDRPass();
 
 private:
