@@ -18,8 +18,7 @@ VkDescriptorSetLayout	Shader::PerFrameDescriptors::vkDesciptorSetLayout = VK_NUL
 
 
 Shader::Shader()
-	: m_psoCache(nullptr)
-	, m_descriptorSetCache(VK_NULL_HANDLE)
+	: m_descriptorSetCache(VK_NULL_HANDLE)
 	, m_stages()
 	, m_source()
 	, m_ShaderVariant()
@@ -59,7 +58,7 @@ Shader::~Shader()
 			vkDestroyShaderModule(VkGlobals::vkDevice, shaderStage.module, VkGlobals::vkAllocatorCallback);
 		}
 
-		for (auto& descriptorSet : shader.second.m_PerDrawcallDescriptorSets)
+		for (auto& descriptorSet : shader.second.perDrawcallDescriptorSets)
 		{
 			vkFreeDescriptorSets(VkGlobals::vkDevice, VkGlobals::vkDescriptorPool, 1, &descriptorSet.second);
 		}
@@ -101,25 +100,25 @@ void Shader::CreatePipelineLayout(VulkanShader& shader, PipeStateObj& pipelineSt
 
 void Shader::CreatePerDrawcallDescriptorSet(VulkanShader& shader, uint32_t descriptorSetMask)
 {
-	m_descriptorSetCache = nullptr;
+	m_descriptorSetCache = VK_NULL_HANDLE;
 	if (shader.vkPerDrawcallDesciptorSetLayout == VK_NULL_HANDLE)
 	{
 		return;
 	}
 
-	if (shader.m_PerDrawcallDescriptorSets.find(descriptorSetMask) != shader.m_PerDrawcallDescriptorSets.end())
+	if (shader.perDrawcallDescriptorSets.find(descriptorSetMask) != shader.perDrawcallDescriptorSets.end())
 	{
-		m_descriptorSetCache = &shader.m_PerDrawcallDescriptorSets[descriptorSetMask];
+		m_descriptorSetCache = shader.perDrawcallDescriptorSets[descriptorSetMask];
 		return;
 	}
-
-	m_descriptorSetCache = &shader.m_PerDrawcallDescriptorSets[descriptorSetMask];
 
 	VkDescriptorSetAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
 	allocateInfo.descriptorPool = VkGlobals::vkDescriptorPool;
 	allocateInfo.descriptorSetCount = 1;
 	allocateInfo.pSetLayouts = &shader.vkPerDrawcallDesciptorSetLayout;
-	VK_ASSERT(vkAllocateDescriptorSets(VkGlobals::vkDevice, &allocateInfo, m_descriptorSetCache));
+	VK_ASSERT(vkAllocateDescriptorSets(VkGlobals::vkDevice, &allocateInfo, &shader.perDrawcallDescriptorSets[descriptorSetMask]));
+
+	m_descriptorSetCache = shader.perDrawcallDescriptorSets[descriptorSetMask];
 }
 
 Shader::VulkanShader& Shader::CompileStages(uint64_t bitmask)

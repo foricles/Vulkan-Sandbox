@@ -27,8 +27,8 @@ public:
 	void SetState(const Renderpass& renderpass, uint64_t bitmask, uint32_t descriptorSetMask, const RenderState& renderState);
 
 private:
-	void CreateGraphicsPso(VulkanShader& shader, PipeStateObjMap& pipelineStateObjectsMap, const Renderpass& renderpass, const RenderState& renderState);
+	void CreateGraphicsPso(VulkanShader& shader, PipeStateObj& pipelineStateObj, const Renderpass& renderpass, const RenderState& renderState);
 
 private:
-	std::unordered_map<uint64_t, PipeStateObjMap> m_pipelineStateObjects;
+	PipeStateObj m_psoCache;
 };

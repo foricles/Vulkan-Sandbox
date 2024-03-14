@@ -34,9 +34,9 @@ public:
 	void Draw(VkCommandBuffer commandBuffer, uint32_t width, uint32_t height);
 
 private:
-	void CreatePipeline(VulkanShader& shader, uint64_t bitmask, uint32_t descriptorSetMask);
+	void CreatePipeline(VulkanShader& shader, PipeStateObjWithShaderBindTable& pipelineAndTables, uint32_t descriptorSetMask);
 
 private:
 	uint64_t m_bitmask{ 0 };
-	std::unordered_map<uint64_t, PipeStateObjWithShaderBindTable> m_piplineAndTables;
+	PipeStateObj m_psoCache;
 };

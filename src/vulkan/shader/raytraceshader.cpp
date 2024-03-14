@@ -10,38 +10,40 @@ ShaderRaytrace::ShaderRaytrace()
 
 ShaderRaytrace::~ShaderRaytrace()
 {
-	for (auto& instance : m_piplineAndTables)
+	for (auto& shader : m_ShaderVariant)
 	{
-		vkDestroyPipeline(VkGlobals::vkDevice, instance.second.pipelineStateObject.vkPipeline, VkGlobals::vkAllocatorCallback);
-		vkDestroyPipelineLayout(VkGlobals::vkDevice, instance.second.pipelineStateObject.vkPipelineLayout, VkGlobals::vkAllocatorCallback);
-		vkFreeMemory(VkGlobals::vkDevice, instance.second.tableHitMemory, VkGlobals::vkAllocatorCallback);
-		vkFreeMemory(VkGlobals::vkDevice, instance.second.tableMissMemory, VkGlobals::vkAllocatorCallback);
-		vkFreeMemory(VkGlobals::vkDevice, instance.second.tableRaygenMemory, VkGlobals::vkAllocatorCallback);
-		vkDestroyBuffer(VkGlobals::vkDevice, instance.second.tableHit, VkGlobals::vkAllocatorCallback);
-		vkDestroyBuffer(VkGlobals::vkDevice, instance.second.tableMiss, VkGlobals::vkAllocatorCallback);
-		vkDestroyBuffer(VkGlobals::vkDevice, instance.second.tableRaygen, VkGlobals::vkAllocatorCallback);
+		auto& pipelineAndTables = shader.second.GetPso<PipeStateObjWithShaderBindTable>();
+		vkDestroyPipeline(VkGlobals::vkDevice, pipelineAndTables.pipelineStateObject.vkPipeline, VkGlobals::vkAllocatorCallback);
+		vkDestroyPipelineLayout(VkGlobals::vkDevice, pipelineAndTables.pipelineStateObject.vkPipelineLayout, VkGlobals::vkAllocatorCallback);
+		vkFreeMemory(VkGlobals::vkDevice, pipelineAndTables.tableHitMemory, VkGlobals::vkAllocatorCallback);
+		vkFreeMemory(VkGlobals::vkDevice, pipelineAndTables.tableMissMemory, VkGlobals::vkAllocatorCallback);
+		vkFreeMemory(VkGlobals::vkDevice, pipelineAndTables.tableRaygenMemory, VkGlobals::vkAllocatorCallback);
+		vkDestroyBuffer(VkGlobals::vkDevice, pipelineAndTables.tableHit, VkGlobals::vkAllocatorCallback);
+		vkDestroyBuffer(VkGlobals::vkDevice, pipelineAndTables.tableMiss, VkGlobals::vkAllocatorCallback);
+		vkDestroyBuffer(VkGlobals::vkDevice, pipelineAndTables.tableRaygen, VkGlobals::vkAllocatorCallback);
+		pipelineAndTables.~PipeStateObjWithShaderBindTable();
 	}
 }
 
 void ShaderRaytrace::Bind(VkCommandBuffer commandBuffer)
 {
 	std::vector<VkDescriptorSet> descriptorSets = { Shader::PerFrameDescriptors::vkDesciptorSet };
-	if (m_descriptorSetCache != nullptr)
+	if (m_descriptorSetCache != VK_NULL_HANDLE)
 	{
-		descriptorSets.push_back(*m_descriptorSetCache);
+		descriptorSets.push_back(m_descriptorSetCache);
 	}
 
 	vkCmdBindDescriptorSets(
 		commandBuffer,
 		VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-		m_psoCache->vkPipelineLayout,
+		m_psoCache.vkPipelineLayout,
 		0,
 		uint32_t(descriptorSets.size()),
 		descriptorSets.data(),
 		0, nullptr
 	);
 
-	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_psoCache->vkPipeline);
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_psoCache.vkPipeline);
 }
 
 void ShaderRaytrace::SetState(uint64_t bitmask, uint32_t descriptorSetMask)
@@ -49,25 +51,27 @@ void ShaderRaytrace::SetState(uint64_t bitmask, uint32_t descriptorSetMask)
 	m_bitmask = bitmask;
 	VulkanShader& shader = CompileStages(bitmask);
 	CreatePerDrawcallDescriptorSet(shader, descriptorSetMask);
-
-	auto& fnd = m_piplineAndTables.find(bitmask);
-	if (fnd == m_piplineAndTables.end())
+	if (shader.IsPsoNull())
 	{
-		CreatePipeline(shader, bitmask, descriptorSetMask);
-		return;
+		auto& pipelineAndTables = shader.NewPso<PipeStateObjWithShaderBindTable>();
+		CreatePipelineLayout(shader, pipelineAndTables.pipelineStateObject);
+		CreatePipeline(shader, pipelineAndTables, descriptorSetMask);
+		m_psoCache = pipelineAndTables.pipelineStateObject;
 	}
-	m_psoCache = &fnd->second.pipelineStateObject;
+	else
+	{
+		auto& pipelineAndTables = shader.GetPso<PipeStateObjWithShaderBindTable>();
+		m_psoCache = pipelineAndTables.pipelineStateObject;
+	}
 }
 
-void ShaderRaytrace::CreatePipeline(VulkanShader& shader, uint64_t bitmask, uint32_t descriptorSetMask)
+void ShaderRaytrace::CreatePipeline(VulkanShader& shader, PipeStateObjWithShaderBindTable& pipelineAndTables, uint32_t descriptorSetMask)
 {
 	static PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelines = (PFN_vkCreateRayTracingPipelinesKHR)vkGetInstanceProcAddr(VkGlobals::vkInstance, "vkCreateRayTracingPipelinesKHR");
 	static PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandles = (PFN_vkGetRayTracingShaderGroupHandlesKHR)vkGetInstanceProcAddr(VkGlobals::vkInstance, "vkGetRayTracingShaderGroupHandlesKHR");
 	assert(vkCreateRayTracingPipelines != nullptr);
 	assert(vkGetRayTracingShaderGroupHandles != nullptr);
 
-	PipeStateObjWithShaderBindTable& pipelineAndTables = m_piplineAndTables[bitmask];
-	CreatePipelineLayout(shader, pipelineAndTables.pipelineStateObject);
 
 	std::vector<VkRayTracingShaderGroupCreateInfoKHR> shaderGroups(shader.shaderStages.size());
 	for (uint32_t i(0); i < shader.shaderStages.size(); ++i)
@@ -111,7 +115,7 @@ void ShaderRaytrace::CreatePipeline(VulkanShader& shader, uint64_t bitmask, uint
 
 	vkCreateRayTracingPipelines(VkGlobals::vkDevice, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &raytracingPipelineInfo, VkGlobals::vkAllocatorCallback, &pipelineAndTables.pipelineStateObject.vkPipeline);
 
-	m_psoCache = &pipelineAndTables.pipelineStateObject;
+	
 
 
 
@@ -202,7 +206,7 @@ void ShaderRaytrace::Draw(VkCommandBuffer commandBuffer, uint32_t width, uint32_
 	static PFN_vkCmdTraceRaysKHR vkCmdTraceRays = (PFN_vkCmdTraceRaysKHR)vkGetInstanceProcAddr(VkGlobals::vkInstance, "vkCmdTraceRaysKHR");
 	assert(vkCmdTraceRays != nullptr);
 
-	PipeStateObjWithShaderBindTable& pipelineAndTables = m_piplineAndTables[m_bitmask];
+	auto& pipelineAndTables = CompileStages(m_bitmask).GetPso<PipeStateObjWithShaderBindTable>();
 
 	VkStridedDeviceAddressRegionKHR emptySbtEntry = {};
 	vkCmdTraceRays(

@@ -59,9 +59,32 @@ protected:
 
 	struct VulkanShader
 	{
-		std::unordered_map<uint32_t, VkDescriptorSet> m_PerDrawcallDescriptorSets;		// key - descriptor set mask
+		std::unordered_map<uint32_t, VkDescriptorSet> perDrawcallDescriptorSets;		// key - descriptor set mask
 		std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
 		VkDescriptorSetLayout vkPerDrawcallDesciptorSetLayout{ VK_NULL_HANDLE };
+
+	public:
+		template<class T> inline T& GetPso()
+		{
+			return *reinterpret_cast<T*>(pipelineStateObj + 1);
+		}
+
+		template<class T> inline T& NewPso()
+		{
+			static_assert(sizeof(T) < sizeof(pipelineStateObj));
+			new (pipelineStateObj + 1) T();
+			pipelineStateObj[0] = 0xFF;
+
+			return GetPso<T>();
+		}
+
+		inline bool IsPsoNull()
+		{
+			return pipelineStateObj[0] == 0;
+		}
+
+	private:
+		uint8_t pipelineStateObj[256]{ 0 };
 	};
 
 	struct ShaderProgram
@@ -86,7 +109,7 @@ public:
 
 	virtual void Bind(VkCommandBuffer commandBuffer) = 0;
 
-	inline ShaderBinder Binder() { return ShaderBinder(*m_descriptorSetCache); }
+	inline ShaderBinder Binder() { return ShaderBinder(m_descriptorSetCache); }
 	inline bool HasBindables() const { return m_descriptorSetCache != nullptr; }
 
 protected:
@@ -98,8 +121,7 @@ protected:
 	std::optional<ShaderProgram> CompileShaderProgram(const std::string_view mainName, EShaderType eType, const std::vector<std::string> defines = {});
 
 protected:
-	PipeStateObj* m_psoCache;
-	VkDescriptorSet* m_descriptorSetCache;
+	VkDescriptorSet m_descriptorSetCache;
 	std::string m_source;
 	std::unordered_map<uint64_t, VulkanShader> m_ShaderVariant;
 	std::vector<std::pair<EShaderType, std::string>> m_stages;

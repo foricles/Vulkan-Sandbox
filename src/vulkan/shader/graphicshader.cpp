@@ -7,59 +7,66 @@ ShaderGraphics::ShaderGraphics()
 
 ShaderGraphics::~ShaderGraphics()
 {
-	for (auto& pipelines : m_pipelineStateObjects)
+	for (auto& shader : m_ShaderVariant)
 	{
-		for (auto& psoPair : pipelines.second)
+		PipeStateObjMap& objMap = shader.second.GetPso<PipeStateObjMap>();
+		for (auto& pipeStateObj : objMap)
 		{
-			vkDestroyPipelineLayout(VkGlobals::vkDevice, psoPair.second.vkPipelineLayout, VkGlobals::vkAllocatorCallback);
-			vkDestroyPipeline(VkGlobals::vkDevice, psoPair.second.vkPipeline, VkGlobals::vkAllocatorCallback);
+			vkDestroyPipelineLayout(VkGlobals::vkDevice, pipeStateObj.second.vkPipelineLayout, VkGlobals::vkAllocatorCallback);
+			vkDestroyPipeline(VkGlobals::vkDevice, pipeStateObj.second.vkPipeline, VkGlobals::vkAllocatorCallback);
 		}
+		objMap.~unordered_map();
 	}
 }
 
 void ShaderGraphics::Bind(VkCommandBuffer commandBuffer)
 {
 	std::vector<VkDescriptorSet> descriptorSets = { Shader::PerFrameDescriptors::vkDesciptorSet };
-	if (m_descriptorSetCache != nullptr)
+	if (m_descriptorSetCache != VK_NULL_HANDLE)
 	{
-		descriptorSets.push_back(*m_descriptorSetCache);
+		descriptorSets.push_back(m_descriptorSetCache);
 	}
 
 	vkCmdBindDescriptorSets(
 		commandBuffer,
 		VK_PIPELINE_BIND_POINT_GRAPHICS,
-		m_psoCache->vkPipelineLayout,
+		m_psoCache.vkPipelineLayout,
 		0,
 		uint32_t(descriptorSets.size()),
 		descriptorSets.data(),
 		0, nullptr
 	);
 
-	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_psoCache->vkPipeline);
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_psoCache.vkPipeline);
 }
 
 void ShaderGraphics::SetState(const Renderpass& renderpass, uint64_t bitmask, uint32_t descriptorSetMask, const RenderState& renderState)
 {
 	VulkanShader& shader = CompileStages(bitmask);
-	PipeStateObjMap& pipelineStateObjectsMap = m_pipelineStateObjects[bitmask];
-
 	CreatePerDrawcallDescriptorSet(shader, descriptorSetMask);
-	CreateGraphicsPso(shader, pipelineStateObjectsMap, renderpass, renderState);
-}
 
-void ShaderGraphics::CreateGraphicsPso(VulkanShader& shader, PipeStateObjMap& pipelineStateObjectsMap, const Renderpass& renderpass, const RenderState& renderState)
-{
-	const uint64_t rndhash = renderState.Hash();
-	if (pipelineStateObjectsMap.find(rndhash) != pipelineStateObjectsMap.end())
+	if (shader.IsPsoNull())
 	{
-		m_psoCache = &pipelineStateObjectsMap[rndhash];
-		return;
+		shader.NewPso<PipeStateObjMap>();
 	}
 
-	m_psoCache = &pipelineStateObjectsMap[rndhash];
+	const uint64_t rndhash = renderState.Hash();
+	PipeStateObjMap& pipelineStateObjectsMap = shader.GetPso<PipeStateObjMap>();
+	if (pipelineStateObjectsMap.find(rndhash) == pipelineStateObjectsMap.end())
+	{
+		PipeStateObj& pso = pipelineStateObjectsMap[rndhash];
+		CreatePipelineLayout(shader, pso);
+		CreateGraphicsPso(shader, pso, renderpass, renderState);
+		m_psoCache = pso;
+	}
+	else
+	{
+		m_psoCache = pipelineStateObjectsMap[rndhash];
+	}
+}
 
-	CreatePipelineLayout(shader, *m_psoCache);
-
+void ShaderGraphics::CreateGraphicsPso(VulkanShader& shader, PipeStateObj& pipelineStateObj, const Renderpass& renderpass, const RenderState& renderState)
+{
 	VkPipelineInputAssemblyStateCreateInfo inputAssembly = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
 	inputAssembly.topology = to_vk_enum(renderState.topology);
 
@@ -172,9 +179,9 @@ void ShaderGraphics::CreateGraphicsPso(VulkanShader& shader, PipeStateObjMap& pi
 	pipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
 	pipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
 	pipelineCreateInfo.pViewportState = &viewportState;
-	pipelineCreateInfo.layout = m_psoCache->vkPipelineLayout;
+	pipelineCreateInfo.layout = pipelineStateObj.vkPipelineLayout;
 
-	VK_ASSERT(vkCreateGraphicsPipelines(VkGlobals::vkDevice, VK_NULL_HANDLE, 1, &pipelineCreateInfo, VkGlobals::vkAllocatorCallback, &m_psoCache->vkPipeline));
+	VK_ASSERT(vkCreateGraphicsPipelines(VkGlobals::vkDevice, VK_NULL_HANDLE, 1, &pipelineCreateInfo, VkGlobals::vkAllocatorCallback, &pipelineStateObj.vkPipeline));
 }
 
 RenderState::RenderState()
