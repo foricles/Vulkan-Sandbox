@@ -110,7 +110,7 @@ public:
 	virtual void Bind(VkCommandBuffer commandBuffer) = 0;
 
 	inline ShaderBinder Binder() { return ShaderBinder(m_descriptorSetCache); }
-	inline bool HasBindables() const { return m_descriptorSetCache != nullptr; }
+	inline bool HasBindables() const { return m_descriptorSetCache != VK_NULL_HANDLE; }
 
 protected:
 	VulkanShader& CompileStages(uint64_t bitmask);

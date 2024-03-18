@@ -57,3 +57,8 @@ inline float3 WorldPosFromDepth(float2 screenTc, float depth)
 
     return worldSpacePosition.xyz;
 }
+
+inline float RgbToLuma(float3 rgb)
+{
+    return sqrt(dot(rgb, float3(0.299f, 0.587f, 0.114f)));
+}

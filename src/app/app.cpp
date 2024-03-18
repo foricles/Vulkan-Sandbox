@@ -450,6 +450,7 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 	m_pApp->shaderHDRTonemap.Binder()
 			.Image(m_pApp->txrHdrTarget, 0)
 			.ImageSampler(m_pApp->pointSampler, 0)
+			.ImageSampler(m_pApp->linearSampler, 1)
 		.Bind();
 
 
