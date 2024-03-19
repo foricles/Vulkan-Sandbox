@@ -15,7 +15,7 @@
 
 #include "helper.hpp"
 
-#define SSAO_KERNEL 24
+#define SSAO_KERNEL 18
 
 enum EShaderFlags
 {
@@ -60,7 +60,6 @@ struct GBuffer
 {
 	Texture diffuse;
 	Texture normal;
-	Texture txrGlobalPosition;
 	Renderpass renderpass;
 	Framebuffer framebuffer;
 };
@@ -316,7 +315,6 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 	m_pApp->ssao.txrSSAO.Create(VkGlobals::swapchain.width, VkGlobals::swapchain.height, EPixelFormat::Mono);
 	m_pApp->gbuffer.normal.Create(VkGlobals::swapchain.width, VkGlobals::swapchain.height, EPixelFormat::RGBA);
 	m_pApp->gbuffer.diffuse.Create(VkGlobals::swapchain.width, VkGlobals::swapchain.height, EPixelFormat::RGBA);
-	m_pApp->gbuffer.txrGlobalPosition.Create(VkGlobals::swapchain.width, VkGlobals::swapchain.height, EPixelFormat::RGBA32);
 	m_pApp->directionalShadow.txrShadowMask.Create(VkGlobals::swapchain.width, VkGlobals::swapchain.height, EPixelFormat::Mono);
 
 	if (!m_isRenderInit)
@@ -327,8 +325,6 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 			.AddAttachment(EPixelFormat::RGBA, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
 				.ClearOnBegin()
 			.AddAttachment(EPixelFormat::RGBA, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-				.ClearOnBegin()
-			.AddAttachment(EPixelFormat::RGBA32, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
 				.ClearOnBegin()
 			.AddAttachment(EPixelFormat::D32, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL)
 				.ClearOnBegin()
@@ -386,7 +382,6 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 		{
 			m_pApp->gbuffer.diffuse.GetView(),
 			m_pApp->gbuffer.normal.GetView(),
-			m_pApp->gbuffer.txrGlobalPosition.GetView(),
 			m_pApp->txrDepth.GetView()
 		}
 	);
@@ -466,7 +461,7 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 	m_pApp->directionalShadow.shaderShadows.SetState(0, 0);
 	m_pApp->directionalShadow.shaderShadows.Binder()
 			.StorageImage(m_pApp->directionalShadow.txrShadowMask, 0)
-			.Image(m_pApp->gbuffer.txrGlobalPosition, 1)
+			.Image(m_pApp->txrDepth, 1, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL)
 			.AccelerationStructure(m_pApp->directionalShadow.topAccStructure.Get(), 0)
 		.Bind();
 }
@@ -558,8 +553,7 @@ void App::GBufferPass()
 	std::vector<VkClearValue> clearValues(4);
 	clearValues[0].color = { {0.3, 0.3, 0.3, 1} };
 	clearValues[1].color = { {0.5, 0.5, 0.5, 1} };
-	clearValues[2].color = { {0, 0, 0, 1} };
-	clearValues[3].depthStencil = { 1, 0 };
+	clearValues[2].depthStencil = { 1, 0 };
 
 	VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 	renderPassBegin.renderPass = m_pApp->gbuffer.renderpass;

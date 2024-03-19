@@ -2,7 +2,7 @@
 
 RaytracingAccelerationStructure accelerationStructure : register(t0, space1);
 RWTexture2D<float4> shadowmap : register(u0, space1);
-Texture2D<float4> positionTarget : register(t1, space1);
+Texture2D<float> depthTarget : register(t1, space1);
 
 struct Payload
 {
@@ -23,16 +23,16 @@ void RayGenerationRS()
     
     shadowmap[int2(LaunchID.x, LaunchID.y)] = float4(1, 1, 1, 1);
     
-    float2 screenTc = float2(LaunchID.xy) * PerFrame.screenSize.zw;
+    float2 screenTc = (float2(LaunchID.xy) + 0.5f) * PerFrame.screenSize.zw;
     int3 samp = int3(LaunchID.x, LaunchID.y, 0);
     
-    float3 position = positionTarget.Load(samp).xyz;
+    float3 position = WorldPosFromDepth(screenTc, depthTarget.Load(samp).x);
     if (length(position) > 0)
     {
         RayDesc rayDesc;
         rayDesc.Origin = position;
         rayDesc.Direction = -(normalize(PerFrame.directionLight.xyz));
-        rayDesc.TMin = 0.01;
+        rayDesc.TMin = 0.65;
         rayDesc.TMax = 10000;
 
         Payload payload;

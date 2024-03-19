@@ -49,7 +49,6 @@ struct PS_OUTPUT
 {
     float4 Color: SV_Target0;
     float4 Normal: SV_Target1;
-    float4 Position : SV_Target2;
 };
 
 
@@ -81,8 +80,6 @@ PS_OUTPUT MainPS(OUT inp)
     float depth = (2.0 * PerFrame.frustum.x * PerFrame.frustum.y) / (PerFrame.frustum.y + PerFrame.frustum.x - z * (PerFrame.frustum.y - PerFrame.frustum.x));
     
     psOut.Normal.w = depth / PerFrame.frustum.y;
-    
-    psOut.Position = float4(inp.worldPosition, 1);
     
     return psOut;
 }
