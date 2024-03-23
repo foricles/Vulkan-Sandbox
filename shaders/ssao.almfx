@@ -26,19 +26,19 @@ float4 MainVS(uint vid : SV_VertexID) : SV_POSITION
 inline float3x3 AngleAxisMatrix(float angle_cos, float angle_sin, float3 axis)
 {
     float3 xrot = (float3)0;
-    xrot.x = angle_cos + axis.x * axis.x * (1 - angle_cos);
-    xrot.y = axis.x * axis.y * (1 - angle_cos) - axis.z * angle_sin;
-    xrot.z = axis.x * axis.z * (1 - angle_cos) + axis.y * angle_sin;
+    xrot.x = angle_cos + axis.x * axis.x * (1.0f - angle_cos);
+    xrot.y = axis.x * axis.y * (1.0f - angle_cos) - axis.z * angle_sin;
+    xrot.z = axis.x * axis.z * (1.0f - angle_cos) + axis.y * angle_sin;
     
     float3 yrot = (float3)0;
-    yrot.x = axis.y * axis.x * (1 - angle_cos) + axis.z * angle_sin;
-    yrot.y = angle_cos + axis.y * axis.y * (1 - angle_cos);
-    yrot.z = axis.y * axis.z * (1 - angle_cos) - axis.x * angle_sin;
+    yrot.x = axis.y * axis.x * (1.0f - angle_cos) + axis.z * angle_sin;
+    yrot.y = angle_cos + axis.y * axis.y * (1.0f - angle_cos);
+    yrot.z = axis.y * axis.z * (1.0f - angle_cos) - axis.x * angle_sin;
     
     float3 zrot = (float3) 0;
-    zrot.x = axis.z * axis.x * (1 - angle_cos) - axis.y * angle_sin;
-    zrot.y = axis.z * axis.y * (1 - angle_cos) + axis.x * angle_sin;
-    zrot.z = angle_cos + axis.z * axis.z * (1 - angle_cos);
+    zrot.x = axis.z * axis.x * (1.0f - angle_cos) - axis.y * angle_sin;
+    zrot.y = axis.z * axis.y * (1.0f - angle_cos) + axis.x * angle_sin;
+    zrot.z = angle_cos + axis.z * axis.z * (1.0f - angle_cos);
 
     return float3x3(xrot, yrot, zrot);
 }
@@ -46,44 +46,45 @@ inline float3x3 AngleAxisMatrix(float angle_cos, float angle_sin, float3 axis)
 inline float4 ScreenSpaceAmbientOcclusion(float4 position)
 {
     const float2 screenTc = position.xy * PerFrame.screenSize.zw;
-
-    const float3 viewPos = ViewSpacePosFromDepth(screenTc, depthTarget.Sample(pointsampler, screenTc).r);
-    const float3 normal = normalize((normalTarget.Sample(pointsampler, screenTc).rgb * 2) - 1);
     const float linearDepth = normalTarget.Sample(pointsampler, screenTc).w;
     
-    const float3 upDir = float3(0, 1, 0);
-    float3 rotAxis = cross(normal, upDir);
-    const float angle_cos = dot(normal, upDir);
-    const float angle_sin = length(rotAxis);
-    rotAxis = normalize(rotAxis);
-    
-    const float3x3 rotMatrix = AngleAxisMatrix(angle_cos, angle_sin, rotAxis);
-    
-    const float radius = lerp(0.65, 65, linearDepth);
-    
-    float occlusion = 0.0;
-    [unroll]
-    for (uint i = 0; i < SSAO_KERNEL; ++i)
+    float occlusion = 0.0f;
+    if (linearDepth < 0.999999f)
     {
-        const float3 kernel = kernelSSAO[i].xyz;
-        const float3 translated = mul(kernel, rotMatrix);
-        const float3 translated_view = mul(float4(translated, 0), PerFrame.view).xyz * float3(1, -1, 1);
-        const float3 samplePos = translated_view * radius + viewPos;
+        float3 normal = (normalTarget.Sample(pointsampler, screenTc).rgb * 2.0f) - 1.0f;
+        normal = normalize(mul(float4(normal, 0), PerFrame.view).xyz);
+    
+        const float3 upDir = float3(0, 1, 0);
+        const float3 rotAxis = cross(normal, upDir);
+        const float angle_cos = dot(normal, upDir);
+        const float angle_sin = length(rotAxis);
+    
+        const float3x3 rotMatrix = AngleAxisMatrix(angle_cos, angle_sin, normalize(rotAxis));
+    
+        const float radius = lerp(1, 65, linearDepth);
+    
+        const float3 viewPos = ViewSpacePosFromDepth(screenTc, depthTarget.Sample(pointsampler, screenTc).r);
+        [unroll]
+        for (uint i = 0; i < SSAO_KERNEL; ++i)
+        {
+            const float3 translated = mul(kernelSSAO[i].xyz, rotMatrix) * float3(1, -1, 1);
+            const float3 samplePos = translated * radius + viewPos;
         
-        float4 offset = float4(samplePos, 1);
-        offset = mul(offset, PerFrame.proj);
-        offset /= offset.w;
-        offset = offset * 0.5f + 0.5f;
-
-        const float sampleDepth = depthTarget.Sample(pointsampler, offset.xy).r;
-        const float3 sampledViewPos = ViewSpacePosFromDepth(offset.xy, sampleDepth);
+            float4 offset = float4(samplePos, 1);
+            offset = mul(offset, PerFrame.proj);
+            offset /= offset.w;
+            offset = offset * 0.5f + 0.5f;
+            
+            const float sampleDepth = depthTarget.Sample(pointsampler, offset.xy).r;
+            const float3 sampledViewPos = ViewSpacePosFromDepth(offset.xy, sampleDepth);
         
-        float rangeCheck = smoothstep(0.0, 1.0, radius / abs(viewPos.z - samplePos.z));
+            float rangeCheck = smoothstep(0.0f, 1.0f, radius / abs(viewPos.z - samplePos.z));
         
-        const float bias = 0.025f;
-        occlusion += (sampledViewPos.z >= samplePos.z + bias ? 1.0 : 0.0) * rangeCheck;
+            const float bias = lerp(0.025f, 5.0f, linearDepth);
+            occlusion += (sampledViewPos.z >= samplePos.z + bias ? 1.0f : 0.0f) * rangeCheck;
+        }
+        occlusion = 1.0f - (occlusion / SSAO_KERNEL);
     }
-    occlusion = 1.0f - (occlusion / SSAO_KERNEL);
     return float4(occlusion, 1, 1, 1);
 }
 

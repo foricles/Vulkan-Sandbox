@@ -12,7 +12,6 @@ struct INPUT
 struct OUT
 {
     float4 position : SV_POSITION;
-    float3 worldPosition : POSITION1;
     float2 tcCoord : TEXCOORD0;
     float depth : POSITION0;
     float3x3 TBN : NORMAL0;
