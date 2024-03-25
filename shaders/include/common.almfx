@@ -1,4 +1,4 @@
-#define SSAO_KERNEL 18
+#define SSAO_KERNEL 16
 
 struct INPUT
 {

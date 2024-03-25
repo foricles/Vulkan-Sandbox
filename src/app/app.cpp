@@ -15,7 +15,7 @@
 
 #include "helper.hpp"
 
-#define SSAO_KERNEL 18
+#define SSAO_KERNEL 16
 
 enum EShaderFlags
 {
@@ -678,28 +678,18 @@ void App::DrawSkybox()
 	renderstate.depthFunc = EDepthFunc::LessEqual;
 	m_pApp->skybox.shaderSkybox.SetState(m_pApp->skybox.rederpass, 0, 0, renderstate);
 
-	static int startup = 0;
-	static Texture hdisource;
-	if (startup == 0)
+	static bool initSkybox = false;
+	if (!initSkybox)
 	{
+		initSkybox = true;
+
+		Texture hdisource;
 		RawTexture rwtex;
 		ModelLoader::LoadTexture(rwtex, "skyhdr\\sunset.png");
 		hdisource.Load(rwtex.data, rwtex.width, rwtex.height, EPixelFormat::RGBA);
 
-		hdisource.SetBarier(m_pApp->commandBufer,
-			VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
-			VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-		);
-
 		m_pApp->skybox.txrSkybox.CreateCube(1024, 1024, EPixelFormat::RGBA);
 		m_pApp->skybox.txrSkybox.SetViewType(VK_IMAGE_VIEW_TYPE_2D_ARRAY);
-		m_pApp->skybox.txrSkybox.SetBarier(m_pApp->commandBufer,
-			VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
-			VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
-			VK_IMAGE_LAYOUT_GENERAL
-		);
-
 		m_pApp->skybox.shaderEqiToCube.SetState(0, 0);
 		m_pApp->skybox.shaderEqiToCube.Binder()
 			.StorageImage(m_pApp->skybox.txrSkybox, 0)
@@ -707,44 +697,52 @@ void App::DrawSkybox()
 			.Image(hdisource, 0)
 			.Bind();
 
-		m_pApp->skybox.shaderEqiToCube.Bind(m_pApp->commandBufer);
-		vkCmdDispatch(m_pApp->commandBufer, 32, 32, 6);
+		VulkanEngine::SubmitOnce([&](VkCommandBuffer commandBufer) {
+			hdisource.SetBarier(commandBufer,
+				VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+				VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+			);
+
+			m_pApp->skybox.txrSkybox.SetBarier(commandBufer,
+				VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+				VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
+				VK_IMAGE_LAYOUT_GENERAL
+			);
+
+			m_pApp->skybox.shaderEqiToCube.Bind(commandBufer);
+			vkCmdDispatch(commandBufer, 32, 32, 6);
+		});
+
+		VulkanEngine::SubmitOnce([&](VkCommandBuffer commandBufer) {
+			m_pApp->skybox.txrSkybox.SetViewType(VK_IMAGE_VIEW_TYPE_CUBE);
+			m_pApp->skybox.txrSkybox.SetBarier(commandBufer,
+				VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+				VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+			);
+		});
+
+		m_pApp->skybox.shaderSkybox.Binder()
+			.ImageSampler(m_pApp->linearSampler, 0)
+			.Image(m_pApp->skybox.txrSkybox, 0)
+			.Bind();
 	}
-	else if (startup == 1)
-	{
-		m_pApp->skybox.txrSkybox.SetViewType(VK_IMAGE_VIEW_TYPE_CUBE);
-		m_pApp->skybox.txrSkybox.SetBarier(m_pApp->commandBufer,
-			VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
-			VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-		);
-	}
-	else
-	{
-		if (startup == 2)
-		{
-			m_pApp->skybox.shaderSkybox.Binder()
-				.ImageSampler(m_pApp->linearSampler, 0)
-				.Image(m_pApp->skybox.txrSkybox, 0)
-				.Bind();
-		}
 
-		VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-		renderPassBegin.renderPass = m_pApp->skybox.rederpass;
-		renderPassBegin.framebuffer = m_pApp->skybox.framebuffer;
-		renderPassBegin.renderArea = m_pApp->rndArea;
-		vkCmdBeginRenderPass(m_pApp->commandBufer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
-		vkCmdSetViewport(m_pApp->commandBufer, 0, 1, &m_pApp->viewport);
-		vkCmdSetScissor(m_pApp->commandBufer, 0, 1, &m_pApp->scissor);
+	VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+	renderPassBegin.renderPass = m_pApp->skybox.rederpass;
+	renderPassBegin.framebuffer = m_pApp->skybox.framebuffer;
+	renderPassBegin.renderArea = m_pApp->rndArea;
+	vkCmdBeginRenderPass(m_pApp->commandBufer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
+	vkCmdSetViewport(m_pApp->commandBufer, 0, 1, &m_pApp->viewport);
+	vkCmdSetScissor(m_pApp->commandBufer, 0, 1, &m_pApp->scissor);
 
-		m_pApp->skybox.shaderSkybox.Bind(m_pApp->commandBufer);
+	m_pApp->skybox.shaderSkybox.Bind(m_pApp->commandBufer);
 
-		vkCmdBindIndexBuffer(m_pApp->commandBufer, m_pApp->skybox.cubeIndecies, 0, VK_INDEX_TYPE_UINT32);
-		vkCmdDrawIndexed(m_pApp->commandBufer, 36, 1, 0, 0, 0);
+	vkCmdBindIndexBuffer(m_pApp->commandBufer, m_pApp->skybox.cubeIndecies, 0, VK_INDEX_TYPE_UINT32);
+	vkCmdDrawIndexed(m_pApp->commandBufer, 36, 1, 0, 0, 0);
 
-		vkCmdEndRenderPass(m_pApp->commandBufer);
-	}
-	++startup;
+	vkCmdEndRenderPass(m_pApp->commandBufer);
 }
 
 App::App()
