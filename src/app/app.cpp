@@ -101,9 +101,11 @@ struct AppPimpl
 	GBuffer gbuffer;
 	SSAO ssao;
 
+	Renderpass zprepassRenderpass;
 	Renderpass lightingRenderpass;
 	Renderpass finalizeRenderpass;
 
+	Framebuffer zprepassFramebuffer;
 	Framebuffer hdrTargetFramebuffer;
 	Framebuffer finalizeFramebuffers[VulkanEngine::kSwapchainImageCount];
 
@@ -118,6 +120,7 @@ struct AppPimpl
 	Texture txrDepth;
 	Texture txrHdrTarget;
 
+	ShaderGraphics shaderZPrepass;
 	ShaderGraphics shaderGBuffer;
 	ShaderGraphics shaderLighting;
 	ShaderGraphics shaderSSAO;
@@ -155,6 +158,11 @@ void App::Init()
 	m_pApp->pointSampler.Create(ESampleFilter::Point, ESampleMode::Repeat, 0, 1);
 
 
+	{
+		auto data = helpers::sb_read_file("shaders\\zprepass.almfx");
+		m_pApp->shaderZPrepass.SetSource(reinterpret_cast<char*>(data.data()));
+		m_pApp->shaderZPrepass.MarkProgram(EShaderType::Vertex, "MainVS");
+	}
 	{
 		auto data = helpers::sb_read_file("shaders\\gbuffer.almfx");
 		m_pApp->shaderGBuffer.SetSource(reinterpret_cast<char*>(data.data()));
@@ -321,13 +329,18 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 	{
 		m_isRenderInit = true;
 
+		m_pApp->zprepassRenderpass = RenderpassBuilder()
+			.AddAttachment(EPixelFormat::D32, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL)
+				.ClearOnBegin()
+				.IsDepth()
+			.Create();
+
 		m_pApp->gbuffer.renderpass = RenderpassBuilder()
 			.AddAttachment(EPixelFormat::RGBA, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
 				.ClearOnBegin()
 			.AddAttachment(EPixelFormat::RGBA, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
 				.ClearOnBegin()
 			.AddAttachment(EPixelFormat::D32, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL)
-				.ClearOnBegin()
 				.IsDepth()
 			.Create();
 
@@ -375,6 +388,14 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 			}
 		}
 	}
+
+	m_pApp->zprepassFramebuffer = m_pApp->zprepassRenderpass.CreateFramebuffer(
+		VkGlobals::swapchain.width,
+		VkGlobals::swapchain.height,
+		{
+			m_pApp->txrDepth.GetView()
+		}
+	);
 
 	m_pApp->gbuffer.framebuffer = m_pApp->gbuffer.renderpass.CreateFramebuffer(
 		VkGlobals::swapchain.width,
@@ -429,6 +450,7 @@ void App::OnWidowResize(uint32_t width, uint32_t height)
 
 	Shader::PerFrameDescriptors::Binder().UniformBuffer(m_pApp->constantBuffer, 0).Bind();
 
+	m_pApp->shaderZPrepass.SetState(m_pApp->zprepassRenderpass, 0, 0, RenderState());
 
 	m_pApp->shaderLighting.SetState(m_pApp->lightingRenderpass, 0, 0, m_pApp->fullscreenState);
 	m_pApp->shaderLighting.Binder()
@@ -495,6 +517,40 @@ void App::Render()
 	vkCmdWriteTimestamp(m_pApp->commandBufer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VkGlobals::vkQueryPool, 0);
 
 
+
+	{
+		std::vector<VkClearValue> clearValues(1);
+		clearValues[0].depthStencil = { 1, 0 };
+
+		VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+		renderPassBegin.renderPass = m_pApp->zprepassRenderpass;
+		renderPassBegin.framebuffer = m_pApp->zprepassFramebuffer;
+		renderPassBegin.renderArea = m_pApp->rndArea;
+		renderPassBegin.clearValueCount = uint32_t(clearValues.size());
+		renderPassBegin.pClearValues = clearValues.data();
+		vkCmdBeginRenderPass(m_pApp->commandBufer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
+		vkCmdSetViewport(m_pApp->commandBufer, 0, 1, &m_pApp->viewport);
+		vkCmdSetScissor(m_pApp->commandBufer, 0, 1, &m_pApp->scissor);
+
+		m_pApp->shaderZPrepass.SetState(m_pApp->zprepassRenderpass, 0, 0, RenderState());
+		m_pApp->shaderZPrepass.Bind(m_pApp->commandBufer);
+
+		const VkDeviceSize offsets[] = { 0 };
+		uint32_t currentMaterialID = UINT32_MAX;
+		for (auto& gpuMesh : m_pApp->meshesToDraw)
+		{
+			VkBuffer b[] = { gpuMesh.vertices };
+			vkCmdBindVertexBuffers(m_pApp->commandBufer, 0, 1, b, offsets);
+			vkCmdBindIndexBuffer(m_pApp->commandBufer, gpuMesh.indices, 0, VK_INDEX_TYPE_UINT32);
+			vkCmdDrawIndexed(m_pApp->commandBufer, gpuMesh.indexCount, 1, 0, 0, 0);
+		}
+
+
+		vkCmdEndRenderPass(m_pApp->commandBufer);
+	}
+
+
+
 	GBufferPass();
 
 	SSAOPass();
@@ -550,10 +606,9 @@ void App::Render()
 
 void App::GBufferPass()
 {
-	std::vector<VkClearValue> clearValues(4);
+	std::vector<VkClearValue> clearValues(2);
 	clearValues[0].color = { {0.3, 0.3, 0.3, 1} };
 	clearValues[1].color = { {0.5, 0.5, 0.5, 1} };
-	clearValues[2].depthStencil = { 1, 0 };
 
 	VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 	renderPassBegin.renderPass = m_pApp->gbuffer.renderpass;
@@ -567,12 +622,15 @@ void App::GBufferPass()
 
 	const VkDeviceSize offsets[] = { 0 };
 	uint32_t currentMaterialID = UINT32_MAX;
+	RenderState renderState;
+	renderState.depthFunc = EDepthFunc::Equal;
+	renderState.depthWrite = false;
 	for (auto& gpuMesh : m_pApp->meshesToDraw)
 	{
 		if (currentMaterialID != gpuMesh.materialId)
 		{
 			currentMaterialID = gpuMesh.materialId;
-			m_pApp->shaderGBuffer.SetState(m_pApp->gbuffer.renderpass, m_pApp->materials[gpuMesh.materialId].flags, gpuMesh.materialId, RenderState());
+			m_pApp->shaderGBuffer.SetState(m_pApp->gbuffer.renderpass, m_pApp->materials[gpuMesh.materialId].flags, gpuMesh.materialId, renderState);
 			m_pApp->shaderGBuffer.Bind(m_pApp->commandBufer);
 		}
 

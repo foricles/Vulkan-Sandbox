@@ -105,7 +105,7 @@ void ShaderGraphics::CreateGraphicsPso(VulkanShader& shader, PipeStateObj& pipel
 
 	VkPipelineDepthStencilStateCreateInfo depthStencilInfo = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 	depthStencilInfo.depthTestEnable = VK_TRUE;
-	depthStencilInfo.depthWriteEnable = VK_TRUE;
+	depthStencilInfo.depthWriteEnable = renderState.depthWrite;
 	depthStencilInfo.depthCompareOp = to_vk_enum(renderState.depthFunc);
 	depthStencilInfo.depthBoundsTestEnable = VK_FALSE;
 	depthStencilInfo.minDepthBounds = 0.0f;
@@ -191,7 +191,9 @@ RenderState::RenderState()
 	, frontFace(EFrontFace::CCW)
 	, depthFunc(EDepthFunc::Less)
 	, hasInputAttachment(true)
+	, depthWrite(true)
 {
+	
 }
 
 uint64_t RenderState::Hash() const
@@ -203,6 +205,7 @@ uint64_t RenderState::Hash() const
 	hash += uint64_t(frontFace) * 1000;
 	hash += uint64_t(depthFunc) * 10000;
 	hash += uint64_t(hasInputAttachment) * 100000;
+	hash += uint64_t(depthWrite) * 1000000;
 
 	return hash;
 }

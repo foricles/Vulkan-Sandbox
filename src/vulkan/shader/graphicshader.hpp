@@ -9,7 +9,8 @@ struct RenderState
 	EFillMode fillMode;
 	EFrontFace frontFace;
 	EDepthFunc depthFunc;
-	bool hasInputAttachment;
+	bool hasInputAttachment : 1;
+	bool depthWrite : 1;
 
 	RenderState();
 	uint64_t Hash() const;

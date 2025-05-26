@@ -350,14 +350,12 @@ std::optional<Shader::ShaderProgram> Shader::CompileShaderProgram(const std::str
 
 void Shader::ReflectShaderProgram(ShaderProgram& shaderProgram)
 {
-	SpvReflectShaderModule rmodule;
-	SpvReflectResult result = spvReflectCreateShaderModule(shaderProgram.spirv.size(), shaderProgram.spirv.data(), &rmodule);
+	spv_reflect::ShaderModule rmodule(shaderProgram.spirv);
 
 	uint32_t desCount = 0;
-	std::vector<SpvReflectDescriptorSet*> descriptorSets;
-	spvReflectEnumerateDescriptorSets(&rmodule, &desCount, nullptr);
-	descriptorSets.resize(desCount);
-	spvReflectEnumerateDescriptorSets(&rmodule, &desCount, descriptorSets.data());
+	rmodule.EnumerateDescriptorSets(&desCount, nullptr);
+	std::vector<SpvReflectDescriptorSet*> descriptorSets(desCount);
+	rmodule.EnumerateDescriptorSets(&desCount, descriptorSets.data());
 
 	for (SpvReflectDescriptorSet* descriptorSet : descriptorSets)
 	{

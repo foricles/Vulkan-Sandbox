@@ -4,8 +4,23 @@
 
 OUT MainVS(INPUT inp)
 {
-    const float4x4 vp = mul(transpose(PerFrame.view), transpose(PerFrame.proj));
+    const float4x4 vp = mul(PerFrame.view, PerFrame.proj);
     OUT outv = (OUT) 0;
     outv.position = mul(float4(inp.position, 1.0f), vp);
+    outv.depth = outv.position.z / outv.position.w;
+
+    const float3 normal = inp.normal;
+    const float3 tangent = inp.tangent;
+    const float3 bitangent = inp.bitangent;
+    
+    outv.TBN = float3x3(
+        tangent,
+        bitangent,
+        normal
+    );
+    
+    outv.tcCoord = inp.tcCoord;
+    outv.position.y = -outv.position.y;
+    
     return outv;
 }

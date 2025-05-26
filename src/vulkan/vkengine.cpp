@@ -321,7 +321,12 @@ void VulkanEngine::UpdateSwapchain(uint32_t width, uint32_t height)
         };
 
         VkGlobals::swapchain.presentMode = presentModes[0];
-        if (isPresentModeSupported(VK_PRESENT_MODE_MAILBOX_KHR))
+        if (isPresentModeSupported(VK_PRESENT_MODE_IMMEDIATE_KHR))
+        {
+            VkGlobals::swapchain.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+            std::cout << " chosen mode: " << "IMMEDIATE" << std::endl;
+        }
+        else if (isPresentModeSupported(VK_PRESENT_MODE_MAILBOX_KHR))
         {
             VkGlobals::swapchain.presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
             std::cout << " chosen mode: " << "MAILBOX" << std::endl;
@@ -335,11 +340,6 @@ void VulkanEngine::UpdateSwapchain(uint32_t width, uint32_t height)
         {
             VkGlobals::swapchain.presentMode = VK_PRESENT_MODE_FIFO_KHR;
             std::cout << " chosen mode: " << "FIFO" << std::endl;
-        }
-        else if (isPresentModeSupported(VK_PRESENT_MODE_IMMEDIATE_KHR))
-        {
-            VkGlobals::swapchain.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
-            std::cout << " chosen mode: " << "IMMEDIATE" << std::endl;
         }
     }
 
